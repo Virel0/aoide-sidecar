@@ -21,6 +21,19 @@ public class PluginConfiguration : BasePluginConfiguration
     public int MaxPayloadBytes { get; set; } = 256 * 1024;
 
     /// <summary>
+    /// Gets or sets the deepest payload nesting accepted on push.
+    /// </summary>
+    /// <remarks>
+    /// A stored payload is echoed to every other device on pull, and JSON decoders
+    /// reject an over-nested document whole rather than element by element — so a single
+    /// pathological row would wedge inbound sync everywhere, with no seam for a client to
+    /// skip it. Bounding it here is the only place that can be defended. Real rows nest a
+    /// handful of levels; nested smart-playlist rule groups are the deepest legitimate
+    /// case, so 32 is generous.
+    /// </remarks>
+    public int MaxPayloadDepth { get; set; } = 32;
+
+    /// <summary>
     /// Gets or sets the number of ops returned by a pull that does not specify a limit.
     /// </summary>
     public int DefaultPullLimit { get; set; } = 500;

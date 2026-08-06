@@ -35,6 +35,15 @@
                 </div>
 
                 <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="MaxPayloadDepth">Max payload depth</label>
+                    <input id="MaxPayloadDepth" name="MaxPayloadDepth" type="number" is="emby-input" min="1" max="100" />
+                    <div class="fieldDescription">
+                        Deepest nesting a row may contain. Bounded because clients reject an over-nested
+                        pull response whole, which would stall sync on every device.
+                    </div>
+                </div>
+
+                <div class="inputContainer">
                     <label class="inputLabel inputLabelUnfocused" for="DefaultPullLimit">Default pull limit</label>
                     <input id="DefaultPullLimit" name="DefaultPullLimit" type="number" is="emby-input" min="1" />
                 </div>
@@ -56,7 +65,7 @@
     <script type="text/javascript">
         (function () {
             var pluginId = '959763ae-fc57-4339-b8dc-a9c1800a2883';
-            var fields = ['MaxOpsPerPush', 'MaxPayloadBytes', 'DefaultPullLimit', 'MaxPullLimit'];
+            var fields = ['MaxOpsPerPush', 'MaxPayloadBytes', 'MaxPayloadDepth', 'DefaultPullLimit', 'MaxPullLimit'];
 
             document.querySelector('#AoideSidecarConfigPage').addEventListener('pageshow', function () {
                 Dashboard.showLoadingMsg();

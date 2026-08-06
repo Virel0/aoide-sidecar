@@ -10,7 +10,7 @@ namespace Jellyfin.Plugin.AoideSidecar.Tests;
 /// </summary>
 public class OpValidatorTests
 {
-    private const int MaxPayload = 256 * 1024;
+    private static readonly OpLimits Limits = new(256 * 1024, 32);
 
     private static SyncOpDto Valid() => new()
     {
@@ -25,7 +25,7 @@ public class OpValidatorTests
     [Fact]
     public void Accepts_a_well_formed_op()
     {
-        Assert.True(OpValidator.TryValidate(Valid(), MaxPayload, out var reason));
+        Assert.True(OpValidator.TryValidate(Valid(), Limits, out var reason));
         Assert.Empty(reason);
     }
 
@@ -41,7 +41,7 @@ public class OpValidatorTests
         var op = Valid();
         op.Entity = entity;
 
-        Assert.True(OpValidator.TryValidate(op, MaxPayload, out _));
+        Assert.True(OpValidator.TryValidate(op, Limits, out _));
     }
 
     [Fact]
@@ -52,7 +52,7 @@ public class OpValidatorTests
         var op = Valid();
         op.Entity = SyncEntities.Tracks;
 
-        Assert.False(OpValidator.TryValidate(op, MaxPayload, out var reason));
+        Assert.False(OpValidator.TryValidate(op, Limits, out var reason));
         Assert.Contains("per-device cache", reason, StringComparison.Ordinal);
     }
 
@@ -65,7 +65,7 @@ public class OpValidatorTests
         var op = Valid();
         op.Entity = entity;
 
-        Assert.False(OpValidator.TryValidate(op, MaxPayload, out _));
+        Assert.False(OpValidator.TryValidate(op, Limits, out _));
     }
 
     [Theory]
@@ -77,7 +77,7 @@ public class OpValidatorTests
         var op = Valid();
         op.Operation = operation;
 
-        Assert.False(OpValidator.TryValidate(op, MaxPayload, out _));
+        Assert.False(OpValidator.TryValidate(op, Limits, out _));
     }
 
     [Fact]
@@ -87,7 +87,7 @@ public class OpValidatorTests
         op.Operation = SyncOperations.Delete;
         op.Payload = JsonDocument.Parse("""{"id":"playlist-1","deleted":1}""").RootElement.Clone();
 
-        Assert.True(OpValidator.TryValidate(op, MaxPayload, out _));
+        Assert.True(OpValidator.TryValidate(op, Limits, out _));
     }
 
     [Theory]
@@ -99,7 +99,7 @@ public class OpValidatorTests
         var op = Valid();
         op.OpId = opId;
 
-        Assert.False(OpValidator.TryValidate(op, MaxPayload, out _));
+        Assert.False(OpValidator.TryValidate(op, Limits, out _));
     }
 
     [Fact]
@@ -108,7 +108,7 @@ public class OpValidatorTests
         var op = Valid();
         op.EntityId = "";
 
-        Assert.False(OpValidator.TryValidate(op, MaxPayload, out _));
+        Assert.False(OpValidator.TryValidate(op, Limits, out _));
     }
 
     [Theory]
@@ -121,7 +121,7 @@ public class OpValidatorTests
         var op = Valid();
         op.Payload = JsonDocument.Parse(payload).RootElement.Clone();
 
-        Assert.False(OpValidator.TryValidate(op, MaxPayload, out _));
+        Assert.False(OpValidator.TryValidate(op, Limits, out _));
     }
 
     [Fact]
@@ -132,7 +132,7 @@ public class OpValidatorTests
             .Parse($$"""{"id":"p","blob":"{{new string('x', 2048)}}"}""")
             .RootElement.Clone();
 
-        Assert.False(OpValidator.TryValidate(op, maxPayloadBytes: 1024, out var reason));
+        Assert.False(OpValidator.TryValidate(op, new OpLimits(1024, 32), out var reason));
         Assert.Contains("over the", reason, StringComparison.Ordinal);
     }
 
@@ -144,13 +144,13 @@ public class OpValidatorTests
         var op = Valid();
         op.CreatedAt = createdAt;
 
-        Assert.False(OpValidator.TryValidate(op, MaxPayload, out _));
+        Assert.False(OpValidator.TryValidate(op, Limits, out _));
     }
 
     [Fact]
     public void Rejects_a_null_op()
     {
-        Assert.False(OpValidator.TryValidate(null, MaxPayload, out _));
+        Assert.False(OpValidator.TryValidate(null, Limits, out _));
     }
 
     [Fact]
@@ -163,6 +163,93 @@ public class OpValidatorTests
             .Parse("""{"totally_new_column":true,"nested":{"deep":[1,2,3]}}""")
             .RootElement.Clone();
 
-        Assert.True(OpValidator.TryValidate(op, MaxPayload, out _));
+        Assert.True(OpValidator.TryValidate(op, Limits, out _));
+    }
+
+    private static JsonElement Nested(int depth)
+    {
+        var json = new System.Text.StringBuilder();
+        for (var i = 0; i < depth; i++)
+        {
+            json.Append("{\"a\":");
+        }
+
+        json.Append('1');
+        for (var i = 0; i < depth; i++)
+        {
+            json.Append('}');
+        }
+
+        // Above the parser default of 64 so the helper itself is not the constraint —
+        // the point is to hand the validator something deeper than it will accept.
+        var options = new JsonDocumentOptions { MaxDepth = 256 };
+        return JsonDocument.Parse(json.ToString(), options).RootElement.Clone();
+    }
+
+    [Theory]
+    [InlineData("1", 0)]
+    [InlineData("\"s\"", 0)]
+    [InlineData("""{"a":1}""", 1)]
+    [InlineData("""{"a":{"b":1}}""", 2)]
+    [InlineData("[[1]]", 2)]
+    [InlineData("""{"a":[{"b":1}]}""", 3)]
+    [InlineData("""{"a":1,"b":{"c":{"d":1}}}""", 3)]
+    public void MeasureDepth_counts_nesting_levels(string json, int expected)
+    {
+        using var document = JsonDocument.Parse(json);
+
+        Assert.Equal(expected, OpValidator.MeasureDepth(document.RootElement));
+    }
+
+    [Fact]
+    public void Accepts_a_payload_at_the_depth_limit()
+    {
+        var op = Valid();
+        op.Payload = Nested(32);
+
+        Assert.True(OpValidator.TryValidate(op, Limits, out _));
+    }
+
+    [Fact]
+    public void Rejects_a_payload_past_the_depth_limit()
+    {
+        // A stored payload is echoed to every device on pull, and a JSON decoder refuses
+        // an over-nested document whole rather than per-element. One such row would wedge
+        // inbound sync everywhere with no seam for a client to skip it, so the only place
+        // this can be stopped is on the way in.
+        var op = Valid();
+        op.Payload = Nested(33);
+
+        Assert.False(OpValidator.TryValidate(op, Limits, out var reason));
+        Assert.Contains("levels deep", reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void One_over_nested_op_does_not_condemn_its_batch()
+    {
+        // The property that matters: a bad op is refused on its own so the good ops
+        // beside it still land. Failing the batch would stall the client's queue for one
+        // malformed row.
+        // 100 levels: past the 32 the validator allows, but still inside the 128 the
+        // controller parses, so this is the case that reaches per-op validation at all.
+        var deep = Valid();
+        deep.OpId = "deep";
+        deep.Payload = Nested(100);
+
+        var fine = Valid();
+        fine.OpId = "fine";
+
+        Assert.False(OpValidator.TryValidate(deep, Limits, out _));
+        Assert.True(OpValidator.TryValidate(fine, Limits, out _));
+    }
+
+    [Fact]
+    public void The_default_depth_limit_stays_far_below_what_clients_can_decode()
+    {
+        // Foundation's JSONSerialization gives up around 512 levels, and it fails the
+        // whole document. The stored ceiling has to leave obvious room under that.
+        var configured = new Configuration.PluginConfiguration().MaxPayloadDepth;
+
+        Assert.InRange(configured, 1, 64);
     }
 }

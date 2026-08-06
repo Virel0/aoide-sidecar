@@ -1,4 +1,5 @@
 using System.Net.Mime;
+using System.Text.Json;
 using Jellyfin.Plugin.AoideSidecar.Api.Models;
 using Jellyfin.Plugin.AoideSidecar.Configuration;
 using Jellyfin.Plugin.AoideSidecar.Data;
@@ -51,25 +52,34 @@ public class SyncController : ControllerBase
         _logger = logger;
     }
 
+    /// <remarks>
+    /// The body is parsed here rather than by model binding so that MaxDepth is ours to
+    /// set. It sits well above the per-op depth limit on purpose: an over-nested op then
+    /// reaches the validator and is refused individually with a reason, instead of
+    /// throwing during binding and failing the whole batch — which would wedge a
+    /// client's outbound queue for one bad row, exactly what `rejected` exists to avoid.
+    /// It stays bounded so a hostile body still cannot run the parser away.
+    /// </remarks>
+    private static readonly JsonSerializerOptions PushJsonOptions =
+        new(JsonSerializerDefaults.Web) { MaxDepth = 128 };
+
     private static PluginConfiguration Configuration =>
         Plugin.Instance?.Configuration ?? new PluginConfiguration();
 
     /// <summary>
     /// Appends a batch of ops to the caller's log.
     /// </summary>
-    /// <param name="request">The device id and its ops.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The accepted op ids, any rejections, and the caller's head sequence.</returns>
     /// <response code="200">Ops processed; check <c>accepted</c> for what was stored.</response>
     /// <response code="400">The batch was malformed or larger than the configured limit.</response>
     /// <response code="401">The request carried no valid Jellyfin token.</response>
     [HttpPost("push")]
+    [Consumes(MediaTypeNames.Application.Json)]
     [ProducesResponseType(typeof(PushResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    public async Task<ActionResult<PushResponse>> Push(
-        [FromBody] PushRequest request,
-        CancellationToken cancellationToken)
+    public async Task<ActionResult<PushResponse>> Push(CancellationToken cancellationToken)
     {
         var authorization = await _authorizationContext.GetAuthorizationInfo(Request).ConfigureAwait(false);
         if (authorization.UserId == Guid.Empty)
@@ -77,8 +87,26 @@ public class SyncController : ControllerBase
             return Unauthorized();
         }
 
+        PushRequest? request;
+        try
+        {
+            request = await JsonSerializer
+                .DeserializeAsync<PushRequest>(Request.Body, PushJsonOptions, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (JsonException ex)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Title = "Malformed request body",
+                Detail = ex.Message,
+                Status = StatusCodes.Status400BadRequest
+            });
+        }
+
         var configuration = Configuration;
         var ops = request?.Ops ?? Array.Empty<SyncOpDto>();
+        var limits = new OpLimits(configuration.MaxPayloadBytes, configuration.MaxPayloadDepth);
 
         if (ops.Count > configuration.MaxOpsPerPush)
         {
@@ -114,7 +142,7 @@ public class SyncController : ControllerBase
 
         foreach (var op in ops)
         {
-            if (OpValidator.TryValidate(op, configuration.MaxPayloadBytes, out var reason))
+            if (OpValidator.TryValidate(op, limits, out var reason))
             {
                 valid.Add(op);
                 accepted.Add(op.OpId!);

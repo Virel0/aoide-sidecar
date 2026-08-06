@@ -185,7 +185,15 @@ lost to power failure is lost user data.
 
 **Opacity.** Payloads are stored verbatim and never parsed. Only the envelope is
 validated. This is what lets the curation-store schema gain a column without a
-coordinated server deploy.
+coordinated server deploy — per-field conflict timestamps, for instance, are a client
+change that needs nothing here.
+
+**Bounded depth.** No stored payload nests deeper than 32 levels, so a pull response
+stays far under the ~512 at which client JSON decoders give up. This has to be enforced
+on the way in: a decoder refuses an over-nested document whole rather than element by
+element, so one pathological row would wedge inbound sync on every device with no seam
+to skip it. An op past the limit is refused on its own, leaving the rest of its batch
+intact.
 
 **Clock skew.** Every op is stamped with a server `receivedAt` next to the client's
 `createdAt`, so a device with a badly wrong clock cannot win every field-level conflict

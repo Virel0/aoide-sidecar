@@ -133,6 +133,7 @@ These are enforced. Most are exactly the design doc, but the string matching is 
 | `operation` must be | `upsert` or `delete` — **lowercase, case-sensitive**. `UPSERT` is rejected |
 | `payload` must be | a JSON **object**, the full row after the change. Not an array, string or null |
 | `payload` size | ≤ 256 KB |
+| `payload` nesting | ≤ 32 levels — see [Payload depth](#payload-depth) |
 | `opId` | non-empty, ≤ 128 characters |
 | `entityId` | non-empty, ≤ 256 characters |
 | `createdAt` | a positive millisecond timestamp |
@@ -143,6 +144,96 @@ just split it — no data is at risk.
 
 The payload's *contents* are never inspected. The sidecar stores the JSON verbatim, so
 you can add a column to the curation store without a server deploy.
+
+## Payload depth
+
+**The server guarantees no stored payload nests deeper than 32 levels.** A pull response
+therefore tops out around 35 including the envelope, far under the ~512 where
+Foundation gives up. Inbound sync cannot be wedged by a deep document.
+
+This mattered because the failure has no client-side seam: `JSONDecoder` refuses an
+over-nested document *whole*, so a single bad row would stall every device with no way
+to skip past it. It can only be stopped on the way in, which is where it now is.
+
+Two limits, doing different jobs:
+
+- **32 (configurable)** — the per-op limit. An op past it is refused individually, with
+  a reason, and everything else in the batch still lands.
+- **128** — the parser ceiling for the whole request. A body past *that* is a 400 for
+  the batch. It is bounded so a hostile body cannot run the parser away, and it sits far
+  enough above 32 that anything realistic gets the clean per-op rejection instead.
+
+Before this, a deep payload threw during model binding and took the **entire batch**
+with it — a poison pill that would stall the outbound queue with no clue which op was at
+fault. Reachable by accident through a recursive `smart_rules` bug, not just by a
+hostile peer. If you ever see a 400 titled `Malformed request body`, that is the >128
+case and the batch has a genuinely broken op in it.
+
+## Conflict resolution, per field
+
+`sync-design.md` specifies last-writer-wins **per field**, but the schema carries only
+one `updated_at` per row, so as written it can only do per-row — and one of two
+concurrent edits to different fields is lost.
+
+**Fixing this needs no server change.** The sidecar never parses payloads; it stores the
+JSON object verbatim and hands it back. Per-field timestamps live *inside* the payload,
+which is exactly the kind of schema evolution payload opacity was preserved for. Add the
+field and push — no plugin release, no coordinated deploy, no wire-format negotiation.
+
+A convention that stays backward compatible:
+
+```json
+{
+  "id": "…",
+  "name": "Late Night",
+  "description": "…",
+  "folder_id": null,
+  "updated_at": 1754500000000,
+  "origin_device": "phone",
+  "deleted": 0,
+  "field_updated_at": {
+    "name": 1754500000000,
+    "description": 1754400000000
+  }
+}
+```
+
+Merge rule: for each field, take its timestamp from `field_updated_at`, **falling back to
+the row's `updated_at` when absent**; higher wins; tie breaks on `origin_device`. That
+fallback is what makes it safe to roll out — ops already in the log, and devices on older
+builds, keep working as per-row, and the two interoperate. No migration.
+
+Keep `id` and `deleted` row-level. A soft delete is a fact about the row, not a field,
+and merging it per-field invites a half-deleted row.
+
+### Only two entities need this
+
+| entity | mutable fields | verdict |
+| ------ | -------------- | ------- |
+| `playlists` | name, description, folder_id, smart_rules, sort_index | **needs per-field** |
+| `folders` | name, parent_id, sort_index | **needs per-field** |
+| `playlist_items` | position | per-row is already per-field |
+| `likes` | liked | per-row is already per-field |
+| `play_events` | none — append-only | no conflict is possible |
+| `queue_state` | whole-row snapshot | **keep per-row** |
+
+`queue_state` is the one to be careful with: merging a queue field-by-field could
+produce a playback position from one device against a track list from another — a state
+that existed nowhere. Take the whole row or none of it.
+
+Note also that the reordering half of the design doc's motivating example never reaches
+this path at all: order lives in `playlist_items.position` as a fractional index, so
+concurrent reorders are separate rows and already both survive.
+
+### `seq` as a tiebreak
+
+Every op carries `seq`, a total order every device agrees on. It is a better tiebreak
+than `origin_device` if you want one, since it reflects arrival rather than an arbitrary
+string comparison.
+
+It is **not** a substitute for `updated_at`. A device that edits while offline and syncs
+an hour later gets a *higher* seq than an edit made after it, so ordering by seq alone
+would let a stale edit win.
 
 ## Invariants only the client can enforce
 
