@@ -48,6 +48,23 @@ server.
 Confirm it loaded under Dashboard → Plugins, and check the log for
 `Aoide sync database ready at /config/data/aoide-sidecar/aoide-sync.db`.
 
+### Verify it works
+
+```bash
+JELLYFIN_URL=https://jellyfin.example.com JELLYFIN_TOKEN=<user token> ./scripts/verify.sh
+```
+
+Exercises the whole contract against the live server: plugin loaded, token accepted, an
+op pushed, pulled back with its sequence, re-pushed to prove idempotency, a bad op
+rejected without taking the good op in its batch down with it, and an unauthenticated
+request refused.
+
+The token must be a **user access token**, not a Dashboard API key — an API key carries
+no user id, and every op is scoped to a user, so it gets a 401.
+
+The script writes real ops, which are append-only. Run it before any device has synced
+and wipe the database afterwards; it prints the exact commands.
+
 ### Releasing a new version
 
 ```bash
@@ -81,6 +98,10 @@ covered by whatever already backs that volume up. It is the only copy of a user'
 curation history that is not on a device.
 
 ## The contract
+
+Client-side details — the sync loop, the failure modes that are silent rather than
+loud, and the envelope rules — are in
+[docs/client-integration.md](docs/client-integration.md).
 
 Both endpoints require a normal Jellyfin token:
 
