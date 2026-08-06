@@ -1,0 +1,193 @@
+using System.Globalization;
+using System.Text.Json;
+using Jellyfin.Plugin.AoideSidecar.Api.Models;
+using Microsoft.Data.Sqlite;
+
+namespace Jellyfin.Plugin.AoideSidecar.Data;
+
+/// <summary>
+/// Reads and writes the op log.
+/// </summary>
+public sealed class SyncRepository
+{
+    private readonly SyncDatabase _database;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SyncRepository"/> class.
+    /// </summary>
+    /// <param name="database">The sync database.</param>
+    public SyncRepository(SyncDatabase database)
+    {
+        _database = database;
+    }
+
+    /// <summary>
+    /// Appends validated ops to the log and returns the user's head sequence.
+    /// </summary>
+    /// <remarks>
+    /// Every op carries a client-generated id under a unique index, so re-pushing a
+    /// batch the server already holds inserts nothing and still reports it accepted.
+    /// A client that times out mid-push can simply send the batch again.
+    /// </remarks>
+    /// <param name="userId">The authenticated user.</param>
+    /// <param name="deviceId">The pushing device.</param>
+    /// <param name="ops">Ops that have already passed validation.</param>
+    /// <param name="receivedAt">Server receipt time, in milliseconds since epoch.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The user's head sequence number after the append.</returns>
+    public async Task<long> AppendAsync(
+        Guid userId,
+        string deviceId,
+        IReadOnlyList<SyncOpDto> ops,
+        long receivedAt,
+        CancellationToken cancellationToken)
+    {
+        var user = ToKey(userId);
+
+        await using var connection = await _database.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+        // IMMEDIATE takes the write lock up front. A deferred transaction that reads
+        // before it writes can fail to upgrade under contention, and there is no safe
+        // way to retry that from inside the transaction.
+        await using var transaction = connection.BeginTransaction(deferred: false);
+
+        if (ops.Count > 0)
+        {
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = """
+                INSERT INTO ops (op_id, user_id, device_id, entity, entity_id, operation, payload, created_at, received_at)
+                VALUES ($opId, $userId, $deviceId, $entity, $entityId, $operation, $payload, $createdAt, $receivedAt)
+                ON CONFLICT (user_id, op_id) DO NOTHING;
+                """;
+
+            var opId = command.Parameters.Add("$opId", SqliteType.Text);
+            var userParam = command.Parameters.Add("$userId", SqliteType.Text);
+            var device = command.Parameters.Add("$deviceId", SqliteType.Text);
+            var entity = command.Parameters.Add("$entity", SqliteType.Text);
+            var entityId = command.Parameters.Add("$entityId", SqliteType.Text);
+            var operation = command.Parameters.Add("$operation", SqliteType.Text);
+            var payload = command.Parameters.Add("$payload", SqliteType.Text);
+            var createdAt = command.Parameters.Add("$createdAt", SqliteType.Integer);
+            var received = command.Parameters.Add("$receivedAt", SqliteType.Integer);
+
+            userParam.Value = user;
+            device.Value = deviceId;
+            received.Value = receivedAt;
+
+            foreach (var op in ops)
+            {
+                opId.Value = op.OpId;
+                entity.Value = op.Entity;
+                entityId.Value = op.EntityId;
+                operation.Value = op.Operation;
+                payload.Value = op.Payload.GetRawText();
+                createdAt.Value = op.CreatedAt;
+
+                await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        var cursor = await ReadCursorAsync(connection, transaction, user, cancellationToken).ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+
+        return cursor;
+    }
+
+    /// <summary>
+    /// Reads a page of ops past a cursor, in sequence order.
+    /// </summary>
+    /// <param name="userId">The authenticated user.</param>
+    /// <param name="since">Exclusive lower bound; pass 0 for a full history sync.</param>
+    /// <param name="limit">Maximum ops to return.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The batch, its cursor, and whether more remain.</returns>
+    public async Task<PullResponse> ReadAsync(
+        Guid userId,
+        long since,
+        int limit,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await _database.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+
+        // One row beyond the limit answers hasMore exactly, so a client is never told
+        // to come back for a page that turns out to be empty.
+        command.CommandText = """
+            SELECT seq, op_id, device_id, entity, entity_id, operation, payload, created_at, received_at
+            FROM ops
+            WHERE user_id = $userId AND seq > $since
+            ORDER BY seq
+            LIMIT $limit;
+            """;
+        command.Parameters.AddWithValue("$userId", ToKey(userId));
+        command.Parameters.AddWithValue("$since", since);
+        command.Parameters.AddWithValue("$limit", limit + 1);
+
+        var ops = new List<SyncOpDto>(limit);
+        var hasMore = false;
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            if (ops.Count == limit)
+            {
+                hasMore = true;
+                break;
+            }
+
+            using var document = JsonDocument.Parse(reader.GetString(6));
+
+            ops.Add(new SyncOpDto
+            {
+                Seq = reader.GetInt64(0),
+                OpId = reader.GetString(1),
+                DeviceId = reader.GetString(2),
+                Entity = reader.GetString(3),
+                EntityId = reader.GetString(4),
+                Operation = reader.GetString(5),
+
+                // Clone detaches the element from the document being disposed here.
+                Payload = document.RootElement.Clone(),
+                CreatedAt = reader.GetInt64(7),
+                ReceivedAt = reader.GetInt64(8)
+            });
+        }
+
+        return new PullResponse
+        {
+            Ops = ops,
+            Cursor = ops.Count > 0 ? ops[^1].Seq : since,
+            HasMore = hasMore
+        };
+    }
+
+    /// <summary>
+    /// Reads the user's head sequence number without returning any ops.
+    /// </summary>
+    /// <param name="userId">The authenticated user.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The highest sequence number stored for the user, or 0.</returns>
+    public async Task<long> GetCursorAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        await using var connection = await _database.OpenAsync(cancellationToken).ConfigureAwait(false);
+        return await ReadCursorAsync(connection, null, ToKey(userId), cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<long> ReadCursorAsync(
+        SqliteConnection connection,
+        SqliteTransaction? transaction,
+        string userKey,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT COALESCE(MAX(seq), 0) FROM ops WHERE user_id = $userId;";
+        command.Parameters.AddWithValue("$userId", userKey);
+
+        var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        return Convert.ToInt64(result, CultureInfo.InvariantCulture);
+    }
+
+    private static string ToKey(Guid userId) => userId.ToString("N", CultureInfo.InvariantCulture);
+}

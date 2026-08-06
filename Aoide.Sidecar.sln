@@ -1,0 +1,36 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{D5B90CEA-7A9E-4149-B9A8-E3E8CED9B749}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Jellyfin.Plugin.AoideSidecar", "src\Jellyfin.Plugin.AoideSidecar\Jellyfin.Plugin.AoideSidecar.csproj", "{B1A34647-19F4-40C1-A6A6-CE7A0A5121C7}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{31C0FF9D-6AA7-4EF2-BFAE-A771BB1B2470}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Jellyfin.Plugin.AoideSidecar.Tests", "tests\Jellyfin.Plugin.AoideSidecar.Tests\Jellyfin.Plugin.AoideSidecar.Tests.csproj", "{A27460EB-6D5C-4A6A-8B08-C0913F10DEE7}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{B1A34647-19F4-40C1-A6A6-CE7A0A5121C7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B1A34647-19F4-40C1-A6A6-CE7A0A5121C7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B1A34647-19F4-40C1-A6A6-CE7A0A5121C7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B1A34647-19F4-40C1-A6A6-CE7A0A5121C7}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A27460EB-6D5C-4A6A-8B08-C0913F10DEE7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A27460EB-6D5C-4A6A-8B08-C0913F10DEE7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A27460EB-6D5C-4A6A-8B08-C0913F10DEE7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A27460EB-6D5C-4A6A-8B08-C0913F10DEE7}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{B1A34647-19F4-40C1-A6A6-CE7A0A5121C7} = {D5B90CEA-7A9E-4149-B9A8-E3E8CED9B749}
+		{A27460EB-6D5C-4A6A-8B08-C0913F10DEE7} = {31C0FF9D-6AA7-4EF2-BFAE-A771BB1B2470}
+	EndGlobalSection
+EndGlobal

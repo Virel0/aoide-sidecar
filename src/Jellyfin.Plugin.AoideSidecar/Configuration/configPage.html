@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Aoide Sidecar</title>
+</head>
+<body>
+<div id="AoideSidecarConfigPage" data-role="page" class="page type-interior pluginConfigurationPage"
+     data-controller="__plugin/AoideSidecarConfigPage.js">
+    <div data-role="content">
+        <div class="content-primary">
+            <form id="AoideSidecarConfigForm">
+                <div class="verticalSection">
+                    <h2 class="sectionTitle">Aoide Sidecar</h2>
+                    <p class="fieldDescription">
+                        Relays the Aoide curation store's op log between a user's devices. Playlists,
+                        folders, likes, play history and queue state sync here; the music library
+                        itself stays Jellyfin's.
+                    </p>
+                </div>
+
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="MaxOpsPerPush">Max ops per push</label>
+                    <input id="MaxOpsPerPush" name="MaxOpsPerPush" type="number" is="emby-input" min="1" max="10000" />
+                    <div class="fieldDescription">
+                        A client with a long offline backlog splits it across several pushes.
+                    </div>
+                </div>
+
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="MaxPayloadBytes">Max payload bytes</label>
+                    <input id="MaxPayloadBytes" name="MaxPayloadBytes" type="number" is="emby-input" min="1024" />
+                    <div class="fieldDescription">
+                        Largest single row. A queue_state row holding a very long queue is the realistic maximum.
+                    </div>
+                </div>
+
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="DefaultPullLimit">Default pull limit</label>
+                    <input id="DefaultPullLimit" name="DefaultPullLimit" type="number" is="emby-input" min="1" />
+                </div>
+
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="MaxPullLimit">Max pull limit</label>
+                    <input id="MaxPullLimit" name="MaxPullLimit" type="number" is="emby-input" min="1" />
+                </div>
+
+                <div>
+                    <button is="emby-button" type="submit" class="raised button-submit block emby-button">
+                        <span>Save</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script type="text/javascript">
+        (function () {
+            var pluginId = '959763ae-fc57-4339-b8dc-a9c1800a2883';
+            var fields = ['MaxOpsPerPush', 'MaxPayloadBytes', 'DefaultPullLimit', 'MaxPullLimit'];
+
+            document.querySelector('#AoideSidecarConfigPage').addEventListener('pageshow', function () {
+                Dashboard.showLoadingMsg();
+                ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+                    fields.forEach(function (field) {
+                        document.querySelector('#' + field).value = config[field];
+                    });
+                    Dashboard.hideLoadingMsg();
+                });
+            });
+
+            document.querySelector('#AoideSidecarConfigForm').addEventListener('submit', function (e) {
+                e.preventDefault();
+                Dashboard.showLoadingMsg();
+                ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+                    fields.forEach(function (field) {
+                        config[field] = parseInt(document.querySelector('#' + field).value, 10);
+                    });
+                    ApiClient.updatePluginConfiguration(pluginId, config).then(function (result) {
+                        Dashboard.processPluginConfigurationUpdateResult(result);
+                    });
+                });
+                return false;
+            });
+        })();
+    </script>
+</div>
+</body>
+</html>
