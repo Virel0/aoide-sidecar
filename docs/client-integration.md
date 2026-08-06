@@ -1,217 +1,188 @@
-# Client integration
+# Client integration contract
 
-What the app needs to know to talk to the sidecar. This documents the server as built,
-including the places where it differs from `sync-design.md`.
+What the Aoide app needs to know to talk to the sidecar. This documents the server as
+built, and calls out the places where it differs from `sync-design.md` or where it
+enforces something the design left implicit.
 
-Read the numbered traps first — each one is something that fails silently rather than
-loudly if you get it wrong.
+The server is deliberately dumb. It relays ops and interprets nothing. Merging,
+conflict resolution, smart-rule evaluation and relinking are all yours.
 
 ## Endpoints
 
-Plugin routes live at the Jellyfin server root, alongside Jellyfin's own API:
+Base path is `/aoide/sync` on the Jellyfin server itself — same host, same port, same
+token as every other Jellyfin call.
 
 ```
-POST   {server}/aoide/sync/push
-GET    {server}/aoide/sync/pull?since=<cursor>&limit=<n>
+POST /aoide/sync/push
+GET  /aoide/sync/pull?since=<cursor>&limit=<n>
 ```
 
-Auth is the header the app already sends for every other Jellyfin call:
-
 ```
-Authorization: MediaBrowser Token="<the user's access token>"
+Authorization: MediaBrowser Token="<the user's Jellyfin access token>"
 ```
 
-It must be a **user access token**, not a Dashboard API key. An API key authenticates a
-service, not a person, so it carries no user id — and every op is scoped to a user. An
-API key gets a 401.
-
-Status codes worth distinguishing while wiring this up: `404` means the plugin is not
-loaded, `401` means the token was not accepted, `200` means you are talking to the
-sidecar.
+There is no separate login. If a Jellyfin call works, these work.
 
 ## The sync loop
 
-Push first, then pull, then store the cursor.
+Push before pull. Your own ops come back from pull carrying the sequence number the
+server assigned, which is how you learn they were durably accepted.
 
 ```
-1. push everything in `ops` where synced = 0   (in chunks, see trap 3)
-2. mark those ops synced, using the `accepted` list
-3. pull from the stored cursor, repeatedly, while hasMore
-4. apply each batch in a transaction, then store the new cursor
+1. push all local ops where synced = 0
+2. mark the returned `accepted` ids as synced
+3. quarantine anything in `rejected` (see below) — never retry it
+4. pull from your stored cursor, repeatedly, while hasMore
+5. apply each batch, then store that batch's cursor
 ```
 
-Push before pull because your own ops come back on the pull with a sequence number,
-which is how you learn they were durably accepted.
+Step 5 is ordered that way on purpose: store the cursor **only after the whole batch is
+applied**, so an interrupted sync replays rather than skips.
 
----
+### Cursors
 
-## Trap 1 — the push cursor is not the pull cursor
+`pull` returns a `cursor`. That is your pull cursor. Persist it.
 
-`push` returns a `cursor`. It is the server's **head** sequence for the user. It is
-informational only.
+`push` also returns a `cursor` — **do not store it as your pull cursor.** It is the
+server's head sequence, and ops from your other devices may sit below it that you have
+never seen. Storing it would skip them permanently. It is informational only.
 
-**Do not store it as your pull cursor.** Ops from other devices may sit *below* that
-head that you have never seen. Storing it skips them permanently — the playlists just
-never arrive, with no error anywhere.
+### Your own ops come back
 
-Only a `pull` response advances the pull cursor.
+Pull returns everything for the user, including ops this device pushed. Either apply
+them idempotently (they are the same rows you already have) or skip rows whose
+`deviceId` matches yours. Both are fine; do one of them deliberately.
 
-## Trap 2 — an op can be rejected, and retrying it forever will not help
-
-This is an addition to the original contract. `push` returns:
+## Push
 
 ```json
 {
-  "accepted": ["op-1", "op-3"],
-  "rejected": [{ "opId": "op-2", "reason": "Unknown entity 'albums'." }],
+  "deviceId": "…",
+  "ops": [
+    {
+      "opId": "uuid",
+      "entity": "playlists",
+      "entityId": "uuid",
+      "operation": "upsert",
+      "payload": { },
+      "createdAt": 1754500000000
+    }
+  ]
+}
+```
+
+```json
+{
+  "accepted": ["uuid"],
+  "rejected": [],
   "cursor": 12345
 }
 ```
 
-`accepted` lists what the server durably holds, **including ops it had already seen** —
-so a retry after a timeout is safe and idempotent.
+`accepted` includes ops the server had **already** seen. Re-pushing is accepted and
+ignored, so a push that times out can simply be sent again — that is the whole point of
+the client-generated `opId`. Retry freely.
 
-Anything in `rejected` was refused and always will be. Valid ops in the same batch still
-landed; the batch is not all-or-nothing, deliberately, so one malformed op cannot stall
-every good op behind it forever.
+### `rejected` — not in the original design
 
-Handle it: mark rejected ops as quarantined (a `rejected_reason` column, or similar) and
-stop sending them. If you treat "not accepted" as "retry later", that op is re-sent on
-every sync for the rest of time.
+An op that fails validation is listed in `rejected` with a reason and is left out of
+`accepted`. Valid ops in the same batch still land.
 
-Any op id absent from **both** lists was not stored — treat it as still pending.
+This exists because the two obvious alternatives are both bad: failing the whole batch
+lets one malformed op wedge the queue forever, and dropping it silently loses it with
+no trace. **An op in `rejected` will never be accepted.** Mark it dead and surface it
+in a log — retrying is an infinite loop.
 
-## Trap 3 — batches are capped at 1000 ops
-
-A push larger than that is refused outright with `400`, not partially accepted.
-
-This matters most on the first sync after a long offline stretch, which is exactly when
-the backlog is largest. Chunk the outbound queue in ordered slices and push them in
-sequence — do not push chunks concurrently, or ops can land out of causal order.
-
-## Trap 4 — `entityId` must match the row's own id
-
-The server never parses payloads. It cannot check this, and it will happily store an op
-whose envelope points at one row and whose payload is a different one.
-
-That mismatch only surfaces on another device, as a row written under the wrong key.
-Assert it on the way out.
-
-For `queue_state`, the id is the **device id** — that table is keyed by device, not by a
-row uuid.
-
-## Trap 5 — your own ops come back
-
-`pull` returns everything past the cursor, including ops this device pushed. Each op
-carries `deviceId`, so skip your own if applying them is not perfectly idempotent.
-
-Still advance the cursor past them regardless of whether you apply them.
-
-## Trap 6 — the cursor moves only after the batch is applied
-
-Apply the whole batch and store the cursor in the **same** transaction. If you store the
-cursor first and then crash mid-apply, those ops are skipped forever.
-
-Storing it after means an interrupted sync replays — which is harmless, because applying
-an op twice is a no-op.
-
----
-
-## Envelope rules
-
-Every op must satisfy these or it lands in `rejected`:
-
-| field | rule |
-|---|---|
-| `opId` | non-empty, ≤128 chars. A UUID. This is the idempotency key. |
-| `entity` | one of `playlists`, `playlist_items`, `folders`, `likes`, `play_events`, `queue_state` |
-| `entityId` | non-empty, ≤256 chars |
-| `operation` | `upsert` or `delete`, lowercase |
-| `payload` | a JSON **object**, ≤256 KB |
-| `createdAt` | positive milliseconds since epoch |
-
-`tracks` is rejected with an explicit message. It is a per-device cache rebuilt from each
-client's own Jellyfin connection; keeping it out of the log is what keeps a full history
-sync small.
-
-Deletes are soft: send `operation: "delete"` **with the full row** and `deleted: 1`. The
-server does not synthesise a payload, and the receiving device needs the row's fields to
-apply last-writer-wins against what it already has.
-
-Payloads are stored verbatim and never inspected, so you can add a column to the
-curation store without touching or redeploying the server.
-
-## Conflict resolution is yours
-
-The server orders ops and nothing more. Last-writer-wins per field, comparing
-`updated_at` with `origin_device` as the tiebreak, happens on the client.
-
-Every pulled op carries a server-stamped `receivedAt` alongside your `createdAt`. Use it
-as a sanity bound: a device whose clock is badly wrong would otherwise win every field
-conflict forever. A reasonable rule is to distrust `updated_at` when it sits far ahead of
-`receivedAt`.
-
-Playlist ordering never enters this path — `position` is a fractional index, so two
-concurrent inserts at the same spot both survive.
-
-## Worked example
-
-Push:
+## Pull
 
 ```json
-POST /aoide/sync/push
-{
-  "deviceId": "iphone-15-pro-abc123",
-  "ops": [{
-    "opId": "3f1c9a2e-0b7d-4c1a-9e5f-2d8b6a4c1e70",
-    "entity": "playlists",
-    "entityId": "9c2b1f04-5e3a-4d7b-8a11-6f0e2c9d4b58",
-    "operation": "upsert",
-    "payload": {
-      "id": "9c2b1f04-5e3a-4d7b-8a11-6f0e2c9d4b58",
-      "name": "Late Night", "description": null, "folder_id": null,
-      "is_smart": 0, "smart_rules": null, "sort_index": "a0",
-      "updated_at": 1754500000000, "deleted": 0,
-      "origin_device": "iphone-15-pro-abc123"
-    },
-    "createdAt": 1754500000000
-  }]
-}
+{ "ops": [ … ], "cursor": 12400, "hasMore": true }
 ```
 
-Pull:
+Ops come back in ascending `seq` order, each with three fields the server added:
 
-```json
-GET /aoide/sync/pull?since=0&limit=500
-{
-  "ops": [{
-    "opId": "3f1c9a2e-0b7d-4c1a-9e5f-2d8b6a4c1e70",
-    "entity": "playlists",
-    "entityId": "9c2b1f04-5e3a-4d7b-8a11-6f0e2c9d4b58",
-    "operation": "upsert",
-    "payload": { },
-    "createdAt": 1754500000000,
-    "seq": 41,
-    "deviceId": "iphone-15-pro-abc123",
-    "receivedAt": 1754500000412
-  }],
-  "cursor": 41,
-  "hasMore": false
-}
-```
+| field        | meaning                                             |
+| ------------ | --------------------------------------------------- |
+| `seq`        | server sequence number; the basis of the cursor      |
+| `deviceId`   | which device pushed it                               |
+| `receivedAt` | server receipt time, ms since epoch                  |
 
-`seq`, `deviceId` and `receivedAt` are server-assigned; they are ignored on input.
+`hasMore` is exact — the query reads one row past the limit — so you will never be sent
+back for a page that turns out to be empty.
 
-## Not built yet
+`limit` defaults to 500 and is clamped to 1000.
 
-**Sharing.** Ops are strictly per-user. Collaborative and public playlists need a grant
-model that does not exist — do not design the client as though another user's ops can
-arrive today.
+### Use `receivedAt` for conflict resolution
 
-**Retention.** `play_events` is append-only and nothing prunes it. A new device pulling
-from `since=0` replays the entire listening history. Fine now; worth revisiting before
-the log is large.
+Conflict resolution stays client-side: last-writer-wins per field on `updated_at`, with
+`origin_device` as the tiebreak. But `updated_at` comes from the writing device's clock,
+and a device with a badly wrong clock would otherwise win every conflict forever.
 
-**Playlist export.** Aoide playlists do not appear in Jellyfin's own UI yet. When that
-lands it will be strictly one-way, and an edit made in Jellyfin's UI will be an explicit
-user-initiated import, never an automatic read-back.
+`receivedAt` is the server's own clock, stamped on arrival. Use it to sanity-check
+`createdAt` — a `createdAt` far in the future relative to `receivedAt` is a broken
+clock, not a genuinely newer write.
+
+## What will get your op rejected
+
+These are enforced. Most are exactly the design doc, but the string matching is strict.
+
+| rule | detail |
+| ---- | ------ |
+| `entity` must be one of | `playlists`, `playlist_items`, `folders`, `likes`, `play_events`, `queue_state` |
+| `tracks` is refused | it is a per-device cache; rebuild it from this device's own Jellyfin connection |
+| `operation` must be | `upsert` or `delete` — **lowercase, case-sensitive**. `UPSERT` is rejected |
+| `payload` must be | a JSON **object**, the full row after the change. Not an array, string or null |
+| `payload` size | ≤ 256 KB |
+| `opId` | non-empty, ≤ 128 characters |
+| `entityId` | non-empty, ≤ 256 characters |
+| `createdAt` | a positive millisecond timestamp |
+| batch size | ≤ 1000 ops, else the whole push is 400. Split it |
+
+A batch over the size limit is a hard 400 rather than a partial accept, because you can
+just split it — no data is at risk.
+
+The payload's *contents* are never inspected. The sidecar stores the JSON verbatim, so
+you can add a column to the curation store without a server deploy.
+
+## Invariants only the client can enforce
+
+The server cannot check these, and nothing will complain if you get them wrong:
+
+- **`entityId` must match the `id` inside `payload`.** The server never parses payloads,
+  so a disagreement here will sync happily and then confuse every reader.
+- **`queue_state` uses `device_id` as its `entityId`**, not a UUID — that table is keyed
+  by device.
+- **`deviceId` in the push envelope should match `origin_device` in the payloads.**
+- **Deletes are soft.** Send `operation: "delete"` *and* a full payload with
+  `deleted = 1`. The row still has to travel; a hard delete cannot be synced.
+
+## What the server guarantees
+
+- **Idempotency** — `(user_id, op_id)` is unique. Scoped per user, so op ids only need
+  to be unique within an account.
+- **Ordering** — SQLite serialises writers, so `seq` is commit-ordered. If you see
+  sequence N you have already seen everything below it. A cursor can never skip an op
+  that was in flight.
+- **Gaps are normal** — a rolled-back transaction burns a sequence. The cursor means
+  "everything up to here", not "the next number". Do not treat a gap as data loss.
+- **Durability** — one fsync per push batch. When `accepted` comes back, it is on disk.
+
+## Not there yet
+
+Worth knowing before you build against something that does not exist:
+
+- **No sharing between users.** Ops are strictly scoped to the authenticated user, so
+  collaborative and public playlists have no server support yet. This needs an explicit
+  grant table, not a widened query.
+- **No `play_events` retention.** The log grows without bound and a fresh device
+  replays all of it. Fine now, needs a decision before it gets large.
+- **No playlist export to Jellyfin's UI.** When it lands it will be strictly one-way;
+  edits made in Jellyfin will need to be an explicit user-initiated import, never an
+  automatic read-back, or playlists oscillate.
+- **No `downloads` table.** "Per-device downloads with shared state" is on the Phase 2
+  list but has no schema in the design doc. If it needs to sync, it needs a table and an
+  entry in the server's entity allow-list — tell me and I will add it.
+- **Likes write-through.** The design has likes written through to Jellyfin when online.
+  That is currently unimplemented on the server side, so if the client is doing it
+  directly against Jellyfin's API, that is the behaviour — and it is idempotent, so
+  two devices doing it is harmless.
