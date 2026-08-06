@@ -9,6 +9,14 @@
         "imageUrl": "",
         "versions": [
             {
+                "version": "1.0.1.0",
+                "changelog": "Bound payload nesting depth so one over-nested row cannot wedge inbound sync, and refuse it per-op instead of failing the whole batch.",
+                "targetAbi": "10.10.0.0",
+                "sourceUrl": "https://github.com/Virel0/aoide-sidecar/releases/download/v1.0.1.0/aoide-sidecar_1.0.1.0.zip",
+                "checksum": "5d4451a125127dcab6bbe64aa066a374",
+                "timestamp": "2026-08-06T23:38:01Z"
+            },
+            {
                 "version": "1.0.0.0",
                 "changelog": "First release: push/pull sync contract for the Aoide curation store.",
                 "targetAbi": "10.10.0.0",
