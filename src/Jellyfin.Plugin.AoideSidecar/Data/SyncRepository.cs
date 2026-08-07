@@ -22,6 +22,111 @@ public sealed class SyncRepository
     }
 
     /// <summary>
+    /// Gets the full path of the SQLite file, for diagnostics and log context.
+    /// </summary>
+    public string DatabasePath => _database.DatabasePath;
+
+    /// <summary>
+    /// Reports what the sidecar can see of its own storage, including whether the
+    /// database actually accepts a write.
+    /// </summary>
+    /// <remarks>
+    /// A store that reads but will not write produces exactly one symptom from the
+    /// outside — pull works, push fails — and nothing in a normal response says why.
+    /// This makes that case answer for itself.
+    /// </remarks>
+    /// <param name="userId">The authenticated user.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The status, with <c>Error</c> set if the check could not complete.</returns>
+    public async Task<SyncStatusDto> GetStatusAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        var status = new SyncStatusDto
+        {
+            DatabasePath = _database.DatabasePath,
+            SchemaVersion = -1
+        };
+
+        // Probed before opening the database, because this is the check that still
+        // answers when opening is the thing that fails.
+        status.DirectoryWritable = ProbeDirectory(_database.DatabasePath);
+
+        try
+        {
+            await using var connection = await _database.OpenAsync(cancellationToken).ConfigureAwait(false);
+            var user = ToKey(userId);
+
+            status.JournalMode = (await ScalarAsync(connection, "PRAGMA journal_mode;", cancellationToken)
+                .ConfigureAwait(false))?.ToString();
+
+            status.SchemaVersion = Convert.ToInt32(
+                await ScalarAsync(connection, "PRAGMA user_version;", cancellationToken).ConfigureAwait(false),
+                CultureInfo.InvariantCulture);
+
+            status.Cursor = await ReadCursorAsync(connection, null, user, cancellationToken).ConfigureAwait(false);
+
+            await using (var count = connection.CreateCommand())
+            {
+                count.CommandText = "SELECT COUNT(*) FROM ops WHERE user_id = $userId;";
+                count.Parameters.AddWithValue("$userId", user);
+                status.OpCount = Convert.ToInt64(
+                    await count.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false),
+                    CultureInfo.InvariantCulture);
+            }
+
+            // Take the write lock and dirty a page for real, then commit. Re-setting
+            // user_version to the value it already holds is a genuine write with no
+            // change of meaning, so this exercises the same path push does.
+            await using var probe = connection.BeginTransaction(deferred: false);
+            await using (var write = connection.CreateCommand())
+            {
+                write.Transaction = probe;
+                write.CommandText = $"PRAGMA user_version={status.SchemaVersion};";
+                await write.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            await probe.CommitAsync(cancellationToken).ConfigureAwait(false);
+            status.Writable = true;
+        }
+        catch (Exception ex)
+        {
+            status.Error = $"{ex.GetType().Name}: {ex.Message}";
+        }
+
+        return status;
+    }
+
+    private static bool ProbeDirectory(string databasePath)
+    {
+        try
+        {
+            var directory = Path.GetDirectoryName(databasePath);
+            if (string.IsNullOrEmpty(directory) || !Directory.Exists(directory))
+            {
+                return false;
+            }
+
+            var probe = Path.Combine(directory, ".aoide-write-probe");
+            File.WriteAllText(probe, string.Empty);
+            File.Delete(probe);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    private static async Task<object?> ScalarAsync(
+        SqliteConnection connection,
+        string sql,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        return await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Appends validated ops to the log and returns the user's head sequence.
     /// </summary>
     /// <remarks>

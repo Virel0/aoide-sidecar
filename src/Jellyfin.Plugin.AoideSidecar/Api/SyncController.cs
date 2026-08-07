@@ -166,15 +166,79 @@ public class SyncController : ControllerBase
                 rejected[0].Reason);
         }
 
-        var cursor = await _repository
-            .AppendAsync(authorization.UserId, deviceId, valid, UnixNow(), cancellationToken)
-            .ConfigureAwait(false);
+        long cursor;
+        try
+        {
+            cursor = await _repository
+                .AppendAsync(authorization.UserId, deviceId, valid, UnixNow(), cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return StorageFailure(ex, "push");
+        }
 
         return Ok(new PushResponse
         {
             Accepted = accepted,
             Rejected = rejected,
             Cursor = cursor
+        });
+    }
+
+    /// <summary>
+    /// Reports the sidecar's view of its own storage.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Database path, schema version, whether writes succeed, and op counts.</returns>
+    /// <response code="200">The status. Check <c>writable</c> and <c>error</c>.</response>
+    /// <response code="401">The request carried no valid Jellyfin token.</response>
+    [HttpGet("status")]
+    [ProducesResponseType(typeof(SyncStatusDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<SyncStatusDto>> Status(CancellationToken cancellationToken)
+    {
+        var authorization = await _authorizationContext.GetAuthorizationInfo(Request).ConfigureAwait(false);
+        if (authorization.UserId == Guid.Empty)
+        {
+            return Unauthorized();
+        }
+
+        var status = await _repository.GetStatusAsync(authorization.UserId, cancellationToken).ConfigureAwait(false);
+        if (!status.Writable)
+        {
+            _logger.LogError(
+                "Aoide sync storage is not writable at {Path}: {Error}",
+                status.DatabasePath,
+                status.Error ?? "the write probe failed without an exception");
+        }
+
+        return Ok(status);
+    }
+
+    /// <summary>
+    /// Turns a storage exception into something a client and its user can act on.
+    /// </summary>
+    /// <remarks>
+    /// 503 rather than 500 on purpose: a store that cannot be written is usually
+    /// transient or fixable, and the client must keep the ops queued and retry rather
+    /// than treat them as delivered. The detail is echoed because the alternative — the
+    /// host's generic error page — leaves the cause visible only in the server log.
+    /// </remarks>
+    private ObjectResult StorageFailure(Exception exception, string operation)
+    {
+        _logger.LogError(
+            exception,
+            "Aoide sync {Operation} failed against {Path}",
+            operation,
+            _repository.DatabasePath);
+
+        return StatusCode(StatusCodes.Status503ServiceUnavailable, new ProblemDetails
+        {
+            Title = "Sync storage unavailable",
+            Detail = $"{exception.GetType().Name}: {exception.Message}",
+            Status = StatusCodes.Status503ServiceUnavailable,
+            Instance = _repository.DatabasePath
         });
     }
 
@@ -219,11 +283,18 @@ public class SyncController : ControllerBase
             1,
             configuration.MaxPullLimit);
 
-        var response = await _repository
-            .ReadAsync(authorization.UserId, since, effectiveLimit, cancellationToken)
-            .ConfigureAwait(false);
+        try
+        {
+            var response = await _repository
+                .ReadAsync(authorization.UserId, since, effectiveLimit, cancellationToken)
+                .ConfigureAwait(false);
 
-        return Ok(response);
+            return Ok(response);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return StorageFailure(ex, "pull");
+        }
     }
 
     private static long UnixNow() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();

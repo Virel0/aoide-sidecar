@@ -23,6 +23,47 @@ Authorization: MediaBrowser Token="<the user's Jellyfin access token>"
 
 There is no separate login. If a Jellyfin call works, these work.
 
+## Response casing — fixed in 1.0.2.0, action needed
+
+Before 1.0.2.0 the server returned **PascalCase** JSON — `{"Accepted":…,"Cursor":…}`,
+`{"Ops":…,"HasMore":…}` — because Jellyfin configures MVC's serialiser with a PascalCase
+naming policy for its own API, and the responses inherited it. That silently contradicted
+this document and fails to decode on anything case-sensitive.
+
+From 1.0.2.0 every field is pinned with an explicit wire name and comes back **camelCase**,
+exactly as documented here. If anything on the client was written to tolerate or expect
+the PascalCase shape, undo it — plain `CodingKeys`-free `Decodable` structs now work.
+
+## When storage fails: 503
+
+If the database cannot be read or written, both endpoints now return **503** with a
+`ProblemDetails` body naming the real cause, instead of a bare 500:
+
+```json
+{ "title": "Sync storage unavailable",
+  "detail": "SqliteException: SQLite Error 26: 'file is not a database'.",
+  "instance": "/config/data/aoide-sidecar/aoide-sync.db" }
+```
+
+503 rather than 500 is deliberate: this is usually transient or fixable, and the ops are
+still yours. **Keep them queued and retry** — do not mark them synced, and do not
+quarantine them the way you would a `rejected` op.
+
+## `GET /aoide/sync/status`
+
+Diagnostics, same auth as everything else:
+
+```json
+{ "databasePath": "/config/data/aoide-sidecar/aoide-sync.db",
+  "schemaVersion": 1, "writable": true, "journalMode": "wal",
+  "directoryWritable": true, "cursor": 2, "opCount": 2 }
+```
+
+`writable: false` with `error` set means pushes will fail while pulls keep working.
+`journalMode` should read `wal`; `delete` means SQLite declined WAL, which happens on
+filesystems without shared-memory support and makes every write need a journal file
+beside the database. `directoryWritable: false` is the other half of that story.
+
 ## The sync loop
 
 Push before pull. Your own ops come back from pull carrying the sequence number the
