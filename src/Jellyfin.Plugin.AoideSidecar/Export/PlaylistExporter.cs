@@ -4,9 +4,11 @@ using System.Text;
 using System.Text.Json.Serialization;
 using Jellyfin.Data.Enums;
 using Jellyfin.Plugin.AoideSidecar.Data;
+using MediaBrowser.Common.Configuration;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Playlists;
+using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.Playlists;
 using Microsoft.Extensions.Logging;
 
@@ -45,6 +47,17 @@ public class ExportReport
     [JsonPropertyName("unresolvedTracks")]
     public int UnresolvedTracks { get; set; }
 
+    /// <summary>Gets or sets playlists whose Jellyfin cover was set from the blob store.</summary>
+    [JsonPropertyName("artworkApplied")]
+    public int ArtworkApplied { get; set; }
+
+    /// <summary>
+    /// Gets or sets playlists naming an image hash the blob store does not hold —
+    /// normally a client that pushed the op before uploading the bytes.
+    /// </summary>
+    [JsonPropertyName("artworkMissing")]
+    public int ArtworkMissing { get; set; }
+
     /// <summary>Gets or sets anything that went wrong, per playlist.</summary>
     [JsonPropertyName("errors")]
     public IList<string> Errors { get; } = new List<string>();
@@ -75,26 +88,34 @@ public sealed class PlaylistExporter
     public const string ProviderKey = "AoideSidecar";
 
     private readonly SyncRepository _repository;
+    private readonly PlaylistImageRepository _images;
     private readonly IPlaylistManager _playlistManager;
     private readonly ILibraryManager _libraryManager;
+    private readonly IApplicationPaths _paths;
     private readonly ILogger<PlaylistExporter> _logger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PlaylistExporter"/> class.
     /// </summary>
     /// <param name="repository">The op log.</param>
+    /// <param name="images">Artwork storage.</param>
     /// <param name="playlistManager">Jellyfin's playlist manager.</param>
     /// <param name="libraryManager">Jellyfin's library manager.</param>
+    /// <param name="paths">Server application paths.</param>
     /// <param name="logger">Logger.</param>
     public PlaylistExporter(
         SyncRepository repository,
+        PlaylistImageRepository images,
         IPlaylistManager playlistManager,
         ILibraryManager libraryManager,
+        IApplicationPaths paths,
         ILogger<PlaylistExporter> logger)
     {
         _repository = repository;
+        _images = images;
         _playlistManager = playlistManager;
         _libraryManager = libraryManager;
+        _paths = paths;
         _logger = logger;
     }
 
@@ -179,22 +200,50 @@ public sealed class PlaylistExporter
         }
 
         var trackIds = ResolveTracks(playlist, report);
-        var contentHash = HashContents(playlist.Name, trackIds);
+        var contentHash = HashContents(playlist.Name, trackIds, playlist.ImageHash);
 
         var target = mappedItemId is not null ? _libraryManager.GetItemById(Guid.Parse(mappedItemId)) : null;
-        if (target is not null && string.Equals(mappedHash, contentHash, StringComparison.Ordinal))
+
+        // The stamp is checked alongside the contents, not just the contents. A playlist
+        // that lost its provider id — a metadata refresh, an edit in Jellyfin's UI, an
+        // older version of this exporter — would otherwise match on content forever and
+        // never be stamped again, and an unstamped playlist is one this will refuse to
+        // delete. Verifying it here makes that self-healing rather than permanent.
+        if (target is not null
+            && string.Equals(mappedHash, contentHash, StringComparison.Ordinal)
+            && target.ProviderIds.TryGetValue(ProviderKey, out var currentStamp)
+            && string.Equals(currentStamp, playlist.Id, StringComparison.Ordinal))
         {
             report.Unchanged++;
             return;
         }
 
+        var freshlyCreated = false;
+        var wasAdopted = false;
         if (target is null)
         {
             // Either never exported, or the Jellyfin side was removed behind our back.
-            target = Adopt(userId, playlist, report) ?? await CreateAsync(userId, playlist, trackIds, report).ConfigureAwait(false);
+            var adoptedBefore = report.Adopted;
+            target = Adopt(userId, playlist, report);
+            wasAdopted = report.Adopted > adoptedBefore;
+
+            if (target is null)
+            {
+                target = await CreateAsync(userId, playlist, trackIds, report).ConfigureAwait(false);
+                freshlyCreated = true;
+            }
         }
-        else
+
+        if (target is null)
         {
+            return;
+        }
+
+        if (!freshlyCreated)
+        {
+            // Adopted playlists need this every bit as much as already-mapped ones:
+            // adoption hands back the server's playlist under its own name and contents,
+            // so without this a rename made in Aoide would never reach Jellyfin.
             await _playlistManager.UpdatePlaylist(new PlaylistUpdateRequest
             {
                 Id = target.Id,
@@ -203,37 +252,80 @@ public sealed class PlaylistExporter
                 Ids = trackIds
             }).ConfigureAwait(false);
 
-            report.Updated++;
-        }
+            if (!wasAdopted)
+            {
+                report.Updated++;
+            }
 
-        if (target is null)
-        {
-            return;
+            // UpdatePlaylist replaces the stored item, which leaves the copy fetched
+            // above stale. Stamping that copy would write the provider id onto a version
+            // that no longer exists: the stamp silently disappears, taking with it both
+            // the importer's guard and the only evidence that authorises a later delete.
+            target = _libraryManager.GetItemById(target.Id);
+            if (target is null)
+            {
+                return;
+            }
         }
 
         await StampAsync(target, playlist, cancellationToken).ConfigureAwait(false);
+
+        var missingBefore = report.ArtworkMissing;
+        await ApplyArtworkAsync(userId, target, playlist, report, cancellationToken).ConfigureAwait(false);
+
+        // Artwork named but not yet uploaded must not be recorded as settled, or the
+        // unchanged-check would skip this playlist forever and the cover would never
+        // appear. The marker cannot equal a computed hash, so the next run retries.
+        var settled = report.ArtworkMissing == missingBefore
+            ? contentHash
+            : contentHash + ":pending-artwork";
+
         await _repository
             .RecordExportAsync(
                 userId,
                 playlist.Id,
                 target.Id.ToString("N", CultureInfo.InvariantCulture),
-                contentHash,
+                settled,
                 DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                 cancellationToken)
             .ConfigureAwait(false);
     }
 
     /// <summary>
-    /// Takes over an existing same-named Jellyfin playlist instead of making a duplicate.
+    /// Takes over the Jellyfin playlist this one came from, instead of duplicating it.
     /// </summary>
     /// <remarks>
-    /// Only when exactly one unstamped playlist matches. Zero matches means there is
-    /// nothing to adopt; more than one means the name does not identify anything, and
-    /// guessing would put the user's playlist under our management by accident. Both
-    /// fall through to creating a fresh playlist, which is the recoverable outcome.
+    /// <para>
+    /// The source id is tried first because it is an identity rather than a guess. It
+    /// stays right where a name cannot: two server playlists sharing a name are still
+    /// two distinct ids, and renaming the copy in Aoide before the first export no
+    /// longer strands the original. Following the recommended migration, every playlist
+    /// carries one at the point export is switched on.
+    /// </para>
+    /// <para>
+    /// The name rule remains for playlists created fresh in Aoide, where no source
+    /// exists and the name is genuinely the only signal. It fires only on exactly one
+    /// unstamped match: zero means there is nothing to adopt, several means the name
+    /// identifies nothing, and guessing would put a user's own playlist under our
+    /// management. Both fall through to creating a new playlist, the recoverable outcome.
+    /// </para>
     /// </remarks>
     private BaseItem? Adopt(Guid userId, ProjectedPlaylist playlist, ExportReport report)
     {
+        if (!string.IsNullOrEmpty(playlist.SourceJellyfinId)
+            && Guid.TryParse(playlist.SourceJellyfinId, out var sourceId)
+            && _libraryManager.GetItemById(sourceId) is Playlist source
+            && IsAdoptable(source, playlist))
+        {
+            _logger.LogInformation(
+                "Adopting Jellyfin playlist {Id} as the source of Aoide playlist {Aoide}",
+                sourceId,
+                playlist.Id);
+
+            report.Adopted++;
+            return source;
+        }
+
         var candidates = _playlistManager.GetPlaylists(userId)
             .Where(existing =>
                 string.Equals(existing.Name, playlist.Name, StringComparison.OrdinalIgnoreCase)
@@ -254,6 +346,76 @@ public sealed class PlaylistExporter
         report.Adopted++;
         return candidates[0];
     }
+
+    /// <summary>
+    /// Gets a value indicating whether a playlist may be taken over.
+    /// </summary>
+    /// <remarks>
+    /// Free, or already ours. A playlist stamped for a <em>different</em> Aoide id is
+    /// refused so two playlists cannot end up fighting over one mirror, each rewriting
+    /// it on alternate runs.
+    /// </remarks>
+    private static bool IsAdoptable(BaseItem item, ProjectedPlaylist playlist) =>
+        !item.ProviderIds.TryGetValue(ProviderKey, out var owner)
+        || string.Equals(owner, playlist.Id, StringComparison.Ordinal);
+
+    /// <summary>
+    /// Points the Jellyfin playlist's primary image at the artwork the op log names.
+    /// </summary>
+    /// <remarks>
+    /// The file is written under the hash, so identical artwork is stored once and an
+    /// unchanged image costs nothing on a re-run. A hash the blob store does not yet
+    /// hold is counted rather than treated as a failure: it means the client pushed the
+    /// playlist before uploading the bytes, which the next run resolves on its own.
+    /// </remarks>
+    private async Task ApplyArtworkAsync(
+        Guid userId,
+        BaseItem target,
+        ProjectedPlaylist playlist,
+        ExportReport report,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(playlist.ImageHash))
+        {
+            return;
+        }
+
+        var image = await _images.GetAsync(userId, playlist.ImageHash, cancellationToken).ConfigureAwait(false);
+        if (image is null)
+        {
+            report.ArtworkMissing++;
+            return;
+        }
+
+        var directory = Path.Combine(_paths.DataPath, "aoide-sidecar", "artwork");
+        Directory.CreateDirectory(directory);
+
+        var file = Path.Combine(directory, playlist.ImageHash + ExtensionFor(image.MimeType));
+        if (!File.Exists(file))
+        {
+            await File.WriteAllBytesAsync(file, image.Bytes, cancellationToken).ConfigureAwait(false);
+        }
+
+        var current = target.GetImageInfo(ImageType.Primary, 0);
+        if (current is not null && string.Equals(current.Path, file, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        target.SetImage(new ItemImageInfo { Path = file, Type = ImageType.Primary }, 0);
+        await _libraryManager
+            .UpdateItemAsync(target, target.GetParent(), ItemUpdateType.ImageUpdate, cancellationToken)
+            .ConfigureAwait(false);
+
+        report.ArtworkApplied++;
+    }
+
+    private static string ExtensionFor(string mimeType) => mimeType switch
+    {
+        "image/png" => ".png",
+        "image/webp" => ".webp",
+        _ => ".jpg"
+    };
 
     private async Task<BaseItem?> CreateAsync(
         Guid userId,
@@ -332,9 +494,9 @@ public sealed class PlaylistExporter
         return resolved;
     }
 
-    private static string HashContents(string name, IReadOnlyList<Guid> trackIds)
+    private static string HashContents(string name, IReadOnlyList<Guid> trackIds, string? imageHash)
     {
-        var builder = new StringBuilder(name).Append('\n');
+        var builder = new StringBuilder(name).Append('\n').Append(imageHash).Append('\n');
         foreach (var id in trackIds)
         {
             builder.Append(id.ToString("N", CultureInfo.InvariantCulture)).Append(',');

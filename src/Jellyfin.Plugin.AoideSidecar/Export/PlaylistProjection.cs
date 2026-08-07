@@ -24,6 +24,19 @@ public sealed class ProjectedPlaylist
 
     /// <summary>Gets the member track ids, as Jellyfin item ids, in playlist order.</summary>
     public required IReadOnlyList<string> TrackIds { get; init; }
+
+    /// <summary>
+    /// Gets the Jellyfin playlist this one was imported from, when it was.
+    /// </summary>
+    /// <remarks>
+    /// An exact identity, unlike a name. It is what lets the exporter take over the
+    /// original instead of creating a second copy, and it stays correct when the name
+    /// is ambiguous or has since been changed in Aoide.
+    /// </remarks>
+    public string? SourceJellyfinId { get; init; }
+
+    /// <summary>Gets the SHA-256 of the playlist's artwork, if it has any.</summary>
+    public string? ImageHash { get; init; }
 }
 
 /// <summary>
@@ -125,7 +138,16 @@ public static class PlaylistProjection
                 Name = ReadString(op.Payload, "name") ?? string.Empty,
                 IsSmart = ReadBool(op.Payload, "is_smart"),
                 Deleted = IsDeleted(op),
-                TrackIds = tracks
+                TrackIds = tracks,
+
+                // Both spellings are accepted. The curation store's columns are
+                // snake_case, but these two arrived named in camelCase, and a silent
+                // miss here would quietly cost an exact match and fall back to guessing
+                // by name — the exact failure the source id exists to remove.
+                SourceJellyfinId = ReadString(op.Payload, "sourceJellyfinId")
+                    ?? ReadString(op.Payload, "source_jellyfin_id"),
+                ImageHash = ReadString(op.Payload, "image_hash")
+                    ?? ReadString(op.Payload, "imageHash")
             });
         }
 

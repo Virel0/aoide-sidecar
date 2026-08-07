@@ -157,6 +157,44 @@ public class PlaylistProjectionTests
         Assert.Equal(new[] { "trackA" }, Assert.Single(result).TrackIds);
     }
 
+    [Theory]
+    [InlineData("sourceJellyfinId")]
+    [InlineData("source_jellyfin_id")]
+    public void Source_playlist_id_is_read_in_either_spelling(string field)
+    {
+        // The store's columns are snake_case but this one arrived camelCase. Missing it
+        // would silently cost an exact match and fall back to guessing by name.
+        var result = PlaylistProjection.Build(new[]
+        {
+            Op(SyncEntities.Playlists, "p1", 1,
+                $$"""{"id":"p1","name":"X","updated_at":1,"{{field}}":"abc123"}""")
+        });
+
+        Assert.Equal("abc123", Assert.Single(result).SourceJellyfinId);
+    }
+
+    [Fact]
+    public void Artwork_hash_is_read()
+    {
+        var result = PlaylistProjection.Build(new[]
+        {
+            Op(SyncEntities.Playlists, "p1", 1,
+                """{"id":"p1","name":"X","updated_at":1,"image_hash":"8581e780"}""")
+        });
+
+        Assert.Equal("8581e780", Assert.Single(result).ImageHash);
+    }
+
+    [Fact]
+    public void A_playlist_without_a_source_or_artwork_reports_neither()
+    {
+        var result = PlaylistProjection.Build(new[] { Playlist("p1", 1, "Fresh", 100) });
+
+        var playlist = Assert.Single(result);
+        Assert.Null(playlist.SourceJellyfinId);
+        Assert.Null(playlist.ImageHash);
+    }
+
     [Fact]
     public void Unrelated_entities_are_ignored()
     {
