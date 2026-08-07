@@ -434,6 +434,58 @@ playlist in Aoide deletes its Jellyfin mirror.
 Unresolvable tracks are counted and skipped, never fatal — a file may simply be offline,
 and the entry returns on its own once the id resolves again.
 
+## Collaborative playlists
+
+Added in 1.6.0.0.
+
+A playlist belongs to whoever first pushed it. The owner invites another Jellyfin user,
+and from then on both accounts push edits to it and both receive the other's **through
+the pull they already make** — one loop, one cursor, no second sync path.
+
+```
+GET    /aoide/shares                                → what I share out, and what is shared with me
+POST   /aoide/shares  { playlistId, granteeUserId, canEdit }
+DELETE /aoide/shares/{playlistId}/{granteeUserId}
+```
+
+Only the owner can share. Either side can revoke.
+
+### What changes for the client
+
+**Pull can now return ops authored by someone else.** Every op carries `authorUserId`,
+which differs from your user only on a shared playlist. Use it to attribute an edit; do
+not treat a foreign op as your own device's.
+
+A shared playlist otherwise behaves like any other: the same conflict rules, the same
+fractional indices, the same last-writer-wins per field. Two people reordering at once is
+exactly the case fractional indexing already handles.
+
+**Only playlists travel.** `play_events`, `likes` and `queue_state` carry no playlist id,
+so they never cross between accounts. Sharing a playlist shares the playlist, not the
+account's listening.
+
+### The one rejection that is not permanent
+
+Everywhere else in this document, an op in `rejected` will never be accepted. Editing a
+playlist you lack access to is the exception — the reason reads:
+
+```
+Playlist 'p1' belongs to another user and is not shared with you for editing.
+```
+
+That can change, and the same op would then succeed. It usually means the UI let someone
+edit a playlist whose share was revoked while their change sat queued. **Do not retry it
+blindly, and do not silently discard it either**: refresh `/aoide/shares`, and if access
+really is gone, surface it rather than dropping the user's edit without a word.
+
+### Revoking
+
+Revoking stops the owner's future changes reaching the collaborator. It does **not**
+retroactively withdraw ops the collaborator already wrote — those are their own
+authorship and stay in their own stream — and it does not reach into their device to
+delete a playlist they already synced. Drop it locally when it disappears from
+`/aoide/shares`.
+
 ## Invariants only the client can enforce
 
 The server cannot check these, and nothing will complain if you get them wrong:

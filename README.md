@@ -16,7 +16,8 @@ Implemented: the sync contract (`push`, `pull`, auth, storage, validation), the
 `status` diagnostics endpoint, content-addressed playlist artwork, and one-way export of
 playlists into Jellyfin.
 
-Not yet implemented: sharing between users. Noted under [Next](#next).
+Collaborative playlists are supported: the owner invites another Jellyfin user, and
+both can view and edit.
 
 Playlist export also runs as a nightly scheduled task, off by default — enable it under
 the plugin's configuration page.
@@ -29,6 +30,7 @@ the plugin's configuration page.
 | `POST /aoide/export/playlists` | 1.2.0.0 |
 | `GET /aoide/images/orphans`, `POST /aoide/images/orphans/reclaim` | 1.4.0.0 |
 | `GET /aoide/retention`, `POST /aoide/retention/prune` | 1.5.0.0 |
+| `GET`/`POST`/`DELETE /aoide/shares` | 1.6.0.0 |
 
 ## Build
 
@@ -127,8 +129,8 @@ request instead of costing a round-trip to `/Users/Me`. The plugin runs no accou
 system of its own — a second set of credentials would mean two logins per friend and a
 password database this has no business owning.
 
-Ops are scoped to the authenticated user. There is currently no sharing between users;
-collaborative playlists will need an explicit grant rather than a widened query.
+Ops are scoped to the authenticated user, plus the playlists that user owns or has been
+granted. Sharing is an explicit grant per playlist, never a widened query.
 
 ### `POST /aoide/sync/push`
 

@@ -61,6 +61,16 @@ public class SyncOpDto
     public string? DeviceId { get; set; }
 
     /// <summary>
+    /// Gets or sets the account that authored the op.
+    /// </summary>
+    /// <remarks>
+    /// Only differs from the caller on a shared playlist, where a collaborator's edits
+    /// arrive through the same pull. Set by the server; ignored on input.
+    /// </remarks>
+    [JsonPropertyName("authorUserId")]
+    public string? AuthorUserId { get; set; }
+
+    /// <summary>
     /// Gets or sets the server's receipt time, in milliseconds since epoch.
     /// Carried alongside the client's own clock so that a device with a badly wrong
     /// clock cannot win every field-level conflict forever.

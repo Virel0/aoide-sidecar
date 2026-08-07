@@ -33,6 +33,7 @@ namespace Jellyfin.Plugin.AoideSidecar.Api;
 public class SyncController : ControllerBase
 {
     private readonly SyncRepository _repository;
+    private readonly SharingRepository _sharing;
     private readonly IAuthorizationContext _authorizationContext;
     private readonly ILogger<SyncController> _logger;
 
@@ -40,14 +41,17 @@ public class SyncController : ControllerBase
     /// Initializes a new instance of the <see cref="SyncController"/> class.
     /// </summary>
     /// <param name="repository">The op log.</param>
+    /// <param name="sharing">Playlist ownership and shares.</param>
     /// <param name="authorizationContext">Jellyfin's request authorization context.</param>
     /// <param name="logger">Logger.</param>
     public SyncController(
         SyncRepository repository,
+        SharingRepository sharing,
         IAuthorizationContext authorizationContext,
         ILogger<SyncController> logger)
     {
         _repository = repository;
+        _sharing = sharing;
         _authorizationContext = authorizationContext;
         _logger = logger;
     }
@@ -164,6 +168,61 @@ public class SyncController : ControllerBase
                 ops.Count,
                 deviceId,
                 rejected[0].Reason);
+        }
+
+        // Playlist-scoped ops may only be written by the owner, by someone the owner has
+        // granted edit access, or by whoever creates the playlist in the first place.
+        // Refused individually, like any other invalid op, so one denied edit cannot
+        // stall the rest of a device's queue.
+        var playlists = valid
+            .Select(SharingRepository.PlaylistIdOf)
+            .Where(id => !string.IsNullOrEmpty(id))
+            .Select(id => id!)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        if (playlists.Count > 0)
+        {
+            HashSet<string> writable;
+            try
+            {
+                writable = await _sharing
+                    .GetWritableAsync(playlists, authorization.UserId, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                return StorageFailure(ex, "push");
+            }
+
+            for (var i = valid.Count - 1; i >= 0; i--)
+            {
+                var playlistId = SharingRepository.PlaylistIdOf(valid[i]);
+                if (playlistId is null || writable.Contains(playlistId))
+                {
+                    continue;
+                }
+
+                rejected.Add(new RejectedOpDto
+                {
+                    OpId = valid[i].OpId,
+                    Reason = $"Playlist '{playlistId}' belongs to another user and is not shared with you for editing."
+                });
+
+                accepted.Remove(valid[i].OpId!);
+                valid.RemoveAt(i);
+            }
+
+            try
+            {
+                await _sharing
+                    .ClaimOwnershipAsync(writable, authorization.UserId, UnixNow(), cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                return StorageFailure(ex, "push");
+            }
         }
 
         long cursor;

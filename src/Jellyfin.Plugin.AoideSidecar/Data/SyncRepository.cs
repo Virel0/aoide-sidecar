@@ -484,8 +484,8 @@ public sealed class SyncRepository
             await using var command = connection.CreateCommand();
             command.Transaction = transaction;
             command.CommandText = """
-                INSERT INTO ops (op_id, user_id, device_id, entity, entity_id, operation, payload, created_at, received_at)
-                VALUES ($opId, $userId, $deviceId, $entity, $entityId, $operation, $payload, $createdAt, $receivedAt)
+                INSERT INTO ops (op_id, user_id, device_id, entity, entity_id, operation, payload, created_at, received_at, playlist_id)
+                VALUES ($opId, $userId, $deviceId, $entity, $entityId, $operation, $payload, $createdAt, $receivedAt, $playlistId)
                 ON CONFLICT (user_id, op_id) DO NOTHING;
                 """;
 
@@ -498,6 +498,7 @@ public sealed class SyncRepository
             var payload = command.Parameters.Add("$payload", SqliteType.Text);
             var createdAt = command.Parameters.Add("$createdAt", SqliteType.Integer);
             var received = command.Parameters.Add("$receivedAt", SqliteType.Integer);
+            var playlistId = command.Parameters.Add("$playlistId", SqliteType.Text);
 
             userParam.Value = user;
             device.Value = deviceId;
@@ -511,6 +512,10 @@ public sealed class SyncRepository
                 operation.Value = op.Operation;
                 payload.Value = op.Payload.GetRawText();
                 createdAt.Value = op.CreatedAt;
+
+                // Stored beside the op so a collaborator's edit can be routed to the
+                // playlist's owner. Null for everything personal.
+                playlistId.Value = (object?)SharingRepository.PlaylistIdOf(op) ?? DBNull.Value;
 
                 await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             }
@@ -542,9 +547,12 @@ public sealed class SyncRepository
         // One row beyond the limit answers hasMore exactly, so a client is never told
         // to come back for a page that turns out to be empty.
         command.CommandText = """
-            SELECT seq, op_id, device_id, entity, entity_id, operation, payload, created_at, received_at
+            SELECT seq, op_id, device_id, entity, entity_id, operation, payload, created_at, received_at, user_id
             FROM ops
-            WHERE user_id = $userId AND seq > $since
+            WHERE seq > $since AND (
+                    user_id = $userId
+                 OR playlist_id IN (SELECT playlist_id FROM playlist_owners WHERE owner_user_id = $userId)
+                 OR playlist_id IN (SELECT playlist_id FROM playlist_shares WHERE grantee_user_id = $userId))
             ORDER BY seq
             LIMIT $limit;
             """;
@@ -578,7 +586,10 @@ public sealed class SyncRepository
                 // Clone detaches the element from the document being disposed here.
                 Payload = document.RootElement.Clone(),
                 CreatedAt = reader.GetInt64(7),
-                ReceivedAt = reader.GetInt64(8)
+                ReceivedAt = reader.GetInt64(8),
+
+                // Present so a client can tell a collaborator's edit from its own user's.
+                AuthorUserId = reader.GetString(9)
             });
         }
 

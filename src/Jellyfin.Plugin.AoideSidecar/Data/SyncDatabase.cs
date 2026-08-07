@@ -23,7 +23,7 @@ namespace Jellyfin.Plugin.AoideSidecar.Data;
 /// </remarks>
 public sealed class SyncDatabase
 {
-    private const int CurrentSchemaVersion = 3;
+    private const int CurrentSchemaVersion = 4;
 
     private static readonly string[] Migrations =
     {
@@ -92,6 +92,49 @@ public sealed class SyncDatabase
             updated_at INTEGER NOT NULL,
             PRIMARY KEY (user_id, device_id)
         );
+        """,
+
+        // v4 — collaborative playlists.
+        //
+        // Sharing needs the server to know which playlist an op belongs to, which is the
+        // one place it looks inside a payload on the write path. It extracts a single
+        // field, for two entities, and stores it beside the op rather than interpreting
+        // it: everything else stays opaque. Without it a collaborator's ops could not be
+        // routed to the owner, because nothing would connect an op to the playlist it
+        // edits.
+        """
+        ALTER TABLE ops ADD COLUMN playlist_id TEXT;
+
+        UPDATE ops SET playlist_id = entity_id WHERE entity = 'playlists';
+        UPDATE ops SET playlist_id = COALESCE(
+            json_extract(payload, '$.playlistId'),
+            json_extract(payload, '$.playlist_id'))
+        WHERE entity = 'playlist_items';
+
+        CREATE INDEX IF NOT EXISTS idx_ops_playlist ON ops (playlist_id, seq);
+
+        -- Ownership is first-writer-wins. The account that first wrote a playlist row
+        -- owns it, and only an owner may share it or revoke a share.
+        CREATE TABLE IF NOT EXISTS playlist_owners (
+            playlist_id   TEXT PRIMARY KEY,
+            owner_user_id TEXT NOT NULL,
+            created_at    INTEGER NOT NULL
+        );
+
+        INSERT OR IGNORE INTO playlist_owners (playlist_id, owner_user_id, created_at)
+        SELECT playlist_id, user_id, MIN(seq) FROM ops
+        WHERE entity = 'playlists' AND playlist_id IS NOT NULL
+        GROUP BY playlist_id;
+
+        CREATE TABLE IF NOT EXISTS playlist_shares (
+            playlist_id     TEXT NOT NULL,
+            grantee_user_id TEXT NOT NULL,
+            can_edit        INTEGER NOT NULL DEFAULT 1,
+            created_at      INTEGER NOT NULL,
+            PRIMARY KEY (playlist_id, grantee_user_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_shares_grantee ON playlist_shares (grantee_user_id);
         """
     };
 
