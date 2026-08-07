@@ -9,6 +9,14 @@
         "imageUrl": "",
         "versions": [
             {
+                "version": "1.6.0.0",
+                "changelog": "Collaborative playlists: invite a Jellyfin user to a playlist and both can view and edit it.",
+                "targetAbi": "10.11.0.0",
+                "sourceUrl": "https://github.com/Virel0/aoide-sidecar/releases/download/v1.6.0.0/aoide-sidecar_1.6.0.0.zip",
+                "checksum": "b8aa8e2fb85447b83797a2957d926d10",
+                "timestamp": "2026-08-07T22:20:57Z"
+            },
+            {
                 "version": "1.5.0.0",
                 "changelog": "Nightly playlist export task, play-history retention with per-device cursors, and a retarget to Jellyfin 10.11.",
                 "targetAbi": "10.11.0.0",
