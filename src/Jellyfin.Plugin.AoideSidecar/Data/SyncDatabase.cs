@@ -23,7 +23,7 @@ namespace Jellyfin.Plugin.AoideSidecar.Data;
 /// </remarks>
 public sealed class SyncDatabase
 {
-    private const int CurrentSchemaVersion = 2;
+    private const int CurrentSchemaVersion = 3;
 
     private static readonly string[] Migrations =
     {
@@ -74,6 +74,23 @@ public sealed class SyncDatabase
             size       INTEGER NOT NULL,
             created_at INTEGER NOT NULL,
             PRIMARY KEY (user_id, image_hash)
+        );
+        """,
+
+        // v3 — how far each device has pulled.
+        //
+        // Retention cannot be safe without this. Deleting history the server has not yet
+        // handed to a device destroys it for that device permanently, and until now the
+        // server had no idea who had read what: clients hold their own cursors and the
+        // pull request was stateless. Recording the high-water mark per device turns
+        // "old enough to delete" into "old enough, and everyone has already seen it".
+        """
+        CREATE TABLE IF NOT EXISTS device_cursors (
+            user_id    TEXT NOT NULL,
+            device_id  TEXT NOT NULL,
+            cursor     INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY (user_id, device_id)
         );
         """
     };

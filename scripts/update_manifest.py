@@ -12,7 +12,7 @@ import os
 import pathlib
 
 GUID = "959763ae-fc57-4339-b8dc-a9c1800a2883"
-TARGET_ABI = "10.10.0.0"
+TARGET_ABI = "10.11.0.0"
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 MANIFEST = ROOT / "manifest.json"

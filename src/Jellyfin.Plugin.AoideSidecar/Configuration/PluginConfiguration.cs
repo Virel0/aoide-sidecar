@@ -55,6 +55,27 @@ public class PluginConfiguration : BasePluginConfiguration
     public int ArtworkGraceDays { get; set; } = 30;
 
     /// <summary>
+    /// Gets or sets how long play history is kept before it may be pruned.
+    /// </summary>
+    /// <remarks>
+    /// Doubles as the window that decides whether a device still counts: one silent
+    /// longer than this is treated as retired, so a phone in a drawer cannot block
+    /// pruning forever. Ninety days is long enough that a device used seasonally still
+    /// collects its history before anything is dropped.
+    /// </remarks>
+    public int PlayEventRetentionDays { get; set; } = 90;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the nightly playlist export runs.
+    /// </summary>
+    /// <remarks>
+    /// Off by default. Export rewrites Jellyfin playlists from Aoide, so a server that
+    /// has never run one manually should not start doing it unattended because a plugin
+    /// was updated. The endpoint stays available either way.
+    /// </remarks>
+    public bool EnableScheduledExport { get; set; }
+
+    /// <summary>
     /// Gets or sets the number of ops returned by a pull that does not specify a limit.
     /// </summary>
     public int DefaultPullLimit { get; set; } = 500;

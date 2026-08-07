@@ -36,5 +36,6 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<SyncRepository>();
         serviceCollection.AddSingleton<PlaylistImageRepository>();
         serviceCollection.AddSingleton<Export.PlaylistExporter>();
+        serviceCollection.AddSingleton<MediaBrowser.Model.Tasks.IScheduledTask, Export.PlaylistExportTask>();
     }
 }

@@ -289,6 +289,21 @@ public class SyncController : ControllerBase
                 .ReadAsync(authorization.UserId, since, effectiveLimit, cancellationToken)
                 .ConfigureAwait(false);
 
+            // Remember how far this device has read. Nothing in the sync contract needs
+            // it, but retention does: without a record of who has seen what, trimming
+            // old history would destroy it for any device that had not caught up.
+            if (!string.IsNullOrWhiteSpace(authorization.DeviceId))
+            {
+                await _repository
+                    .RecordDeviceCursorAsync(
+                        authorization.UserId,
+                        authorization.DeviceId,
+                        response.Cursor,
+                        UnixNow(),
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
             return Ok(response);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

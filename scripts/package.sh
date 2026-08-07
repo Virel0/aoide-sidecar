@@ -10,7 +10,7 @@
 set -euo pipefail
 
 VERSION="${1:-1.0.0.0}"
-TARGET_ABI="10.10.0.0"
+TARGET_ABI="10.11.0.0"
 GUID="959763ae-fc57-4339-b8dc-a9c1800a2883"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -28,7 +28,7 @@ dotnet build "$PROJECT" -c Release \
 
 # Only our own assembly ships. Microsoft.Data.Sqlite and SQLitePCLRaw come from the
 # server; a second copy would load without a registered native provider.
-cp "$PROJECT/bin/Release/net8.0/Jellyfin.Plugin.AoideSidecar.dll" "$STAGE/"
+cp "$PROJECT/bin/Release/net9.0/Jellyfin.Plugin.AoideSidecar.dll" "$STAGE/"
 
 # Jellyfin regenerates meta.json for repository installs, but a manual scp install
 # needs it present, so it ships either way.

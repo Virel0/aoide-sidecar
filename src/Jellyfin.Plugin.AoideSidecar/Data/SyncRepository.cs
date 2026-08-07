@@ -228,6 +228,196 @@ public sealed class SyncRepository
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Lists the users who have ever pushed an op.
+    /// </summary>
+    /// <remarks>
+    /// Taken from the log rather than from Jellyfin's user list, so a scheduled sweep
+    /// does no work for the accounts that have never used Aoide.
+    /// </remarks>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The distinct user ids present in the log.</returns>
+    public async Task<IReadOnlyList<Guid>> ListUsersAsync(CancellationToken cancellationToken)
+    {
+        await using var connection = await _database.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT DISTINCT user_id FROM ops;";
+
+        var users = new List<Guid>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            if (Guid.TryParse(reader.GetString(0), out var user))
+            {
+                users.Add(user);
+            }
+        }
+
+        return users;
+    }
+
+    /// <summary>
+    /// Records how far a device has pulled.
+    /// </summary>
+    /// <remarks>
+    /// Only ever moves forward. A client is free to re-pull from an earlier cursor to
+    /// replay, and that must not be read as the device having seen less than it has.
+    /// </remarks>
+    /// <param name="userId">The authenticated user.</param>
+    /// <param name="deviceId">The pulling device.</param>
+    /// <param name="cursor">The cursor it has now reached.</param>
+    /// <param name="now">Milliseconds since epoch.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A task.</returns>
+    public async Task RecordDeviceCursorAsync(
+        Guid userId,
+        string deviceId,
+        long cursor,
+        long now,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await _database.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = connection.BeginTransaction(deferred: false);
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO device_cursors (user_id, device_id, cursor, updated_at)
+            VALUES ($u, $d, $c, $t)
+            ON CONFLICT (user_id, device_id) DO UPDATE SET
+                cursor = MAX(cursor, $c),
+                updated_at = $t;
+            """;
+        command.Parameters.AddWithValue("$u", ToKey(userId));
+        command.Parameters.AddWithValue("$d", deviceId);
+        command.Parameters.AddWithValue("$c", cursor);
+        command.Parameters.AddWithValue("$t", now);
+
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Reads every device's pull high-water mark for a user.
+    /// </summary>
+    /// <param name="userId">The authenticated user.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Device id, cursor and when it last pulled.</returns>
+    public async Task<IReadOnlyList<DeviceCursor>> GetDeviceCursorsAsync(
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await _database.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT device_id, cursor, updated_at FROM device_cursors
+            WHERE user_id = $u ORDER BY updated_at DESC;
+            """;
+        command.Parameters.AddWithValue("$u", ToKey(userId));
+
+        var cursors = new List<DeviceCursor>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            cursors.Add(new DeviceCursor(reader.GetString(0), reader.GetInt64(1), reader.GetInt64(2)));
+        }
+
+        return cursors;
+    }
+
+    /// <summary>
+    /// Counts ops per entity for a user.
+    /// </summary>
+    /// <param name="userId">The authenticated user.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Entity name to op count.</returns>
+    public async Task<Dictionary<string, long>> CountByEntityAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        await using var connection = await _database.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT entity, COUNT(*) FROM ops WHERE user_id = $u GROUP BY entity;";
+        command.Parameters.AddWithValue("$u", ToKey(userId));
+
+        var counts = new Dictionary<string, long>(StringComparer.Ordinal);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            counts[reader.GetString(0)] = reader.GetInt64(1);
+        }
+
+        return counts;
+    }
+
+    /// <summary>
+    /// Counts or deletes play-history ops every device has already seen and that have
+    /// passed the retention age.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Restricted to <c>play_events</c> on purpose. Every other entity is current state:
+    /// a playlist's row is the only description of that playlist, so pruning it would not
+    /// trim history, it would delete the playlist for any device syncing from scratch.
+    /// Play events are independent append-only facts, which is what makes them the one
+    /// table where dropping the oldest rows loses detail rather than meaning.
+    /// </para>
+    /// <para>
+    /// Even so, a device that has never synced still receives a shortened history. That
+    /// is the trade this makes, and why nothing here runs on its own.
+    /// </para>
+    /// </remarks>
+    /// <param name="userId">The authenticated user.</param>
+    /// <param name="maxSeq">Highest sequence every active device has already pulled.</param>
+    /// <param name="receivedBefore">Only ops received before this instant qualify.</param>
+    /// <param name="delete">When false, counts without deleting.</param>
+    /// <remarks>
+    /// The newest op is always retained. A user's head sequence is the maximum they hold,
+    /// so deleting the most recent row would walk it backwards — and a head that moves
+    /// backwards contradicts the one thing the sequence promises. Keeping a single row
+    /// anchors it.
+    /// </remarks>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>How many ops matched, or were removed.</returns>
+    public async Task<long> PrunablePlayEventsAsync(
+        Guid userId,
+        long maxSeq,
+        long receivedBefore,
+        bool delete,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await _database.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = connection.BeginTransaction(deferred: false);
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = delete
+            ? """
+              DELETE FROM ops
+              WHERE user_id = $u AND entity = 'play_events' AND seq <= $s AND received_at < $t
+                AND seq < (SELECT MAX(seq) FROM ops WHERE user_id = $u);
+              """
+            : """
+              SELECT COUNT(*) FROM ops
+              WHERE user_id = $u AND entity = 'play_events' AND seq <= $s AND received_at < $t
+                AND seq < (SELECT MAX(seq) FROM ops WHERE user_id = $u);
+              """;
+        command.Parameters.AddWithValue("$u", ToKey(userId));
+        command.Parameters.AddWithValue("$s", maxSeq);
+        command.Parameters.AddWithValue("$t", receivedBefore);
+
+        long result;
+        if (delete)
+        {
+            result = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            result = Convert.ToInt64(
+                await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false),
+                CultureInfo.InvariantCulture);
+        }
+
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return result;
+    }
+
     private static bool ProbeDirectory(string databasePath)
     {
         try
@@ -429,3 +619,11 @@ public sealed class SyncRepository
 
     private static string ToKey(Guid userId) => userId.ToString("N", CultureInfo.InvariantCulture);
 }
+
+/// <summary>
+/// How far one device has pulled.
+/// </summary>
+/// <param name="DeviceId">The device.</param>
+/// <param name="Cursor">Highest sequence it has read.</param>
+/// <param name="UpdatedAt">When it last pulled, milliseconds since epoch.</param>
+public sealed record DeviceCursor(string DeviceId, long Cursor, long UpdatedAt);

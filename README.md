@@ -16,8 +16,10 @@ Implemented: the sync contract (`push`, `pull`, auth, storage, validation), the
 `status` diagnostics endpoint, content-addressed playlist artwork, and one-way export of
 playlists into Jellyfin.
 
-Not yet implemented: scheduled export (it is manual), retention for `play_events`, and
-sharing between users. All noted under [Next](#next).
+Not yet implemented: sharing between users. Noted under [Next](#next).
+
+Playlist export also runs as a nightly scheduled task, off by default — enable it under
+the plugin's configuration page.
 
 | endpoint | since |
 | -------- | ----- |
@@ -26,6 +28,7 @@ sharing between users. All noted under [Next](#next).
 | `PUT`/`GET`/`HEAD /aoide/images/{sha256}` | 1.1.0.0 |
 | `POST /aoide/export/playlists` | 1.2.0.0 |
 | `GET /aoide/images/orphans`, `POST /aoide/images/orphans/reclaim` | 1.4.0.0 |
+| `GET /aoide/retention`, `POST /aoide/retention/prune` | 1.5.0.0 |
 
 ## Build
 
@@ -37,7 +40,7 @@ dotnet test
 ./scripts/package.sh 1.0.0.0
 ```
 
-The build targets .NET 8 and `Jellyfin.Controller` 10.10.7. The plugin ships as a single
+The build targets .NET 9 and `Jellyfin.Controller` 10.11.11. The plugin ships as a single
 DLL: `Microsoft.Data.Sqlite` is referenced with `ExcludeAssets="runtime"` because the
 server already loads it via EF Core, and a second copy would arrive with its own
 `SQLitePCLRaw` that has no native provider registered against it.
@@ -215,9 +218,12 @@ full history sync small.
 
 ## Next
 
-**Scheduled export.** `POST /aoide/export/playlists` is manual. A scheduled task would
-let it run unattended, which is worth having only once the manual form has been watched
-behaving on real data.
+**Play history is trimmed, not archived.** `POST /aoide/retention/prune` only removes
+history every active device has already pulled and that has passed the retention age,
+and it always keeps the newest op so the head sequence cannot move backwards. But a
+device that has *never* synced still receives a shortened history afterwards — no cursor
+can protect a device the server has never met. That is the trade, and it is why nothing
+prunes on a schedule.
 
 **Retention.** `play_events` is append-only and grows without bound. Nothing prunes it
 yet. A device syncing from scratch replays the entire history, so this wants a decision
