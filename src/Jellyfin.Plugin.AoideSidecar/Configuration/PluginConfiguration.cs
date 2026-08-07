@@ -43,6 +43,18 @@ public class PluginConfiguration : BasePluginConfiguration
     public int MaxImageBytes { get; set; } = 5 * 1024 * 1024;
 
     /// <summary>
+    /// Gets or sets how old an unreferenced image must be before it may be reclaimed.
+    /// </summary>
+    /// <remarks>
+    /// Clients upload artwork before pushing the playlist row that names it, so a blob
+    /// sits legitimately unreferenced in between — briefly in the normal case, and for as
+    /// long as a device stays offline with its op still queued. Thirty days covers that
+    /// comfortably. Erring long is deliberate: reclaiming a blob too early breaks a cover
+    /// on every device permanently, while keeping one costs a few hundred kilobytes.
+    /// </remarks>
+    public int ArtworkGraceDays { get; set; } = 30;
+
+    /// <summary>
     /// Gets or sets the number of ops returned by a pull that does not specify a limit.
     /// </summary>
     public int DefaultPullLimit { get; set; } = 500;

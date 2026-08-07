@@ -115,5 +115,92 @@ public sealed class PlaylistImageRepository
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Lists every blob the user has, without loading any image data.
+    /// </summary>
+    /// <remarks>
+    /// The bytes column is deliberately not selected. A sweep over a store holding tens
+    /// of megabytes has no reason to read any of it into memory to answer questions
+    /// about size and age.
+    /// </remarks>
+    /// <param name="userId">The authenticated user.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Every stored blob, newest first.</returns>
+    public async Task<IReadOnlyList<StoredImageInfo>> ListAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        await using var connection = await _database.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT image_hash, size, created_at
+            FROM playlist_images
+            WHERE user_id = $u
+            ORDER BY created_at DESC;
+            """;
+        command.Parameters.AddWithValue("$u", Key(userId));
+
+        var images = new List<StoredImageInfo>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            images.Add(new StoredImageInfo(reader.GetString(0), reader.GetInt64(1), reader.GetInt64(2)));
+        }
+
+        return images;
+    }
+
+    /// <summary>
+    /// Deletes blobs by hash.
+    /// </summary>
+    /// <remarks>
+    /// Every statement is scoped by <c>user_id</c> as well as hash. Content addresses are
+    /// derived from the bytes, so two accounts holding the same image hold the same hash —
+    /// without the user predicate, reclaiming one person's orphan would delete another
+    /// person's live cover.
+    /// </remarks>
+    /// <param name="userId">The authenticated user.</param>
+    /// <param name="hashes">The hashes to remove.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The number of blobs actually deleted.</returns>
+    public async Task<int> DeleteAsync(
+        Guid userId,
+        IReadOnlyCollection<string> hashes,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(hashes);
+
+        if (hashes.Count == 0)
+        {
+            return 0;
+        }
+
+        await using var connection = await _database.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = connection.BeginTransaction(deferred: false);
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "DELETE FROM playlist_images WHERE user_id = $u AND image_hash = $h;";
+
+        var user = command.Parameters.Add("$u", SqliteType.Text);
+        var hash = command.Parameters.Add("$h", SqliteType.Text);
+        user.Value = Key(userId);
+
+        var deleted = 0;
+        foreach (var value in hashes)
+        {
+            hash.Value = value;
+            deleted += await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return deleted;
+    }
+
     private static string Key(Guid userId) => userId.ToString("N", CultureInfo.InvariantCulture);
 }
+
+/// <summary>
+/// A stored blob's metadata, without its bytes.
+/// </summary>
+/// <param name="ImageHash">Lowercase hex SHA-256 of the content.</param>
+/// <param name="SizeBytes">Size on disk.</param>
+/// <param name="CreatedAt">Milliseconds since epoch when it was first stored.</param>
+public sealed record StoredImageInfo(string ImageHash, long SizeBytes, long CreatedAt);

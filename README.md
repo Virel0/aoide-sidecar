@@ -25,6 +25,7 @@ sharing between users. All noted under [Next](#next).
 | `GET /aoide/sync/status` | 1.0.2.0 |
 | `PUT`/`GET`/`HEAD /aoide/images/{sha256}` | 1.1.0.0 |
 | `POST /aoide/export/playlists` | 1.2.0.0 |
+| `GET /aoide/images/orphans`, `POST /aoide/images/orphans/reclaim` | 1.4.0.0 |
 
 ## Build
 

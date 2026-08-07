@@ -318,6 +318,38 @@ Setting artwork:
 Receiving artwork: an inbound playlist op whose `image_hash` you have no local copy of
 is a `GET` away. Cache it by hash on disk.
 
+### Seeing what the store holds, and reclaiming what it doesn't need
+
+Added in 1.4.0.0.
+
+```
+GET  /aoide/images/orphans                          → reports; deletes nothing
+POST /aoide/images/orphans/reclaim?olderThanDays=30 → explicit, opt-in
+```
+
+```json
+{ "totalBlobs": 14, "totalBytes": 3221225, "orphanBytes": 184320, "graceDays": 30,
+  "orphans": [ { "imageHash": "8581e780…", "sizeBytes": 20480, "ageDays": 41, "reclaimable": true } ],
+  "reclaimed": 0, "reclaimedBytes": 0 }
+```
+
+The report is also the answer to "did my upload actually arrive?" — a blob you just
+pushed shows up immediately with `ageDays: 0` and `reclaimable: false`. That is why
+orphans inside the grace period are listed rather than hidden.
+
+**Nothing is ever reclaimed automatically.** A blob that looks unreferenced is not always
+safe to delete: the contract has you upload bytes *before* pushing the row that names
+them, so in between, a blob is genuinely unreferenced and genuinely still needed. A
+device that uploaded, went offline, and returns weeks later with its op still queued is
+the same situation stretched out. The grace period, measured from when the blob was
+stored, covers it.
+
+`olderThanDays` can only make a sweep **more** cautious — a smaller value is raised to the
+configured grace period. Waiving it would defeat the point of having one.
+
+Artwork shared by two playlists stays alive while either one does, which matters because
+content addressing makes sharing the normal case.
+
 ### Why hashes rather than playlist ids
 
 The address *is* the content, which buys several things at once: re-uploading is a

@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using Jellyfin.Plugin.AoideSidecar.Configuration;
 using Jellyfin.Plugin.AoideSidecar.Data;
+using Jellyfin.Plugin.AoideSidecar.Export;
 using MediaBrowser.Controller.Net;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -31,6 +32,7 @@ public class ImagesController : ControllerBase
     };
 
     private readonly PlaylistImageRepository _images;
+    private readonly SyncRepository _repository;
     private readonly IAuthorizationContext _authorizationContext;
     private readonly ILogger<ImagesController> _logger;
 
@@ -38,14 +40,17 @@ public class ImagesController : ControllerBase
     /// Initializes a new instance of the <see cref="ImagesController"/> class.
     /// </summary>
     /// <param name="images">Artwork storage.</param>
+    /// <param name="repository">The op log, for working out which artwork is still in use.</param>
     /// <param name="authorizationContext">Jellyfin's request authorization context.</param>
     /// <param name="logger">Logger.</param>
     public ImagesController(
         PlaylistImageRepository images,
+        SyncRepository repository,
         IAuthorizationContext authorizationContext,
         ILogger<ImagesController> logger)
     {
         _images = images;
+        _repository = repository;
         _authorizationContext = authorizationContext;
         _logger = logger;
     }
@@ -173,6 +178,92 @@ public class ImagesController : ControllerBase
         Response.Headers.ETag = $"\"{hash}\"";
 
         return File(image.Bytes, image.MimeType);
+    }
+
+    /// <summary>
+    /// Reports stored artwork that no live playlist refers to. Deletes nothing.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>What is stored, and how much of it is unreferenced.</returns>
+    /// <response code="200">The report.</response>
+    /// <response code="401">The request carried no valid Jellyfin token.</response>
+    [HttpGet("orphans")]
+    [ProducesResponseType(typeof(OrphanReportDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<OrphanReportDto>> Orphans(CancellationToken cancellationToken)
+    {
+        var authorization = await _authorizationContext.GetAuthorizationInfo(Request).ConfigureAwait(false);
+        if (authorization.UserId == Guid.Empty)
+        {
+            return Unauthorized();
+        }
+
+        return Ok(await SurveyAsync(authorization.UserId, Configuration.ArtworkGraceDays, cancellationToken)
+            .ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Deletes unreferenced artwork that has passed the grace period.
+    /// </summary>
+    /// <remarks>
+    /// Never runs on its own. <paramref name="olderThanDays"/> may only make the sweep
+    /// more cautious: it is raised to the configured grace period if a smaller value is
+    /// asked for, because the grace period exists to cover a blob whose playlist row has
+    /// not been pushed yet, and letting a caller waive it would defeat the point.
+    /// </remarks>
+    /// <param name="olderThanDays">Minimum age to delete; clamped upward to the configured grace.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The survey, with what was actually removed.</returns>
+    /// <response code="200">The sweep ran; see <c>reclaimed</c>.</response>
+    /// <response code="401">The request carried no valid Jellyfin token.</response>
+    [HttpPost("orphans/reclaim")]
+    [ProducesResponseType(typeof(OrphanReportDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<OrphanReportDto>> Reclaim(
+        [FromQuery] int? olderThanDays,
+        CancellationToken cancellationToken)
+    {
+        var authorization = await _authorizationContext.GetAuthorizationInfo(Request).ConfigureAwait(false);
+        if (authorization.UserId == Guid.Empty)
+        {
+            return Unauthorized();
+        }
+
+        var grace = Math.Max(olderThanDays ?? Configuration.ArtworkGraceDays, Configuration.ArtworkGraceDays);
+        var report = await SurveyAsync(authorization.UserId, grace, cancellationToken).ConfigureAwait(false);
+
+        var doomed = report.Orphans.Where(o => o.Reclaimable).ToList();
+        if (doomed.Count == 0)
+        {
+            return Ok(report);
+        }
+
+        var deleted = await _images
+            .DeleteAsync(authorization.UserId, doomed.Select(o => o.ImageHash!).ToList(), cancellationToken)
+            .ConfigureAwait(false);
+
+        report.Reclaimed = deleted;
+        report.ReclaimedBytes = doomed.Sum(o => o.SizeBytes);
+        report.Orphans = report.Orphans.Where(o => !o.Reclaimable).ToList();
+        report.OrphanBytes -= report.ReclaimedBytes;
+
+        _logger.LogInformation(
+            "Reclaimed {Count} orphaned playlist images ({Bytes} bytes) older than {Days} days for {User}",
+            deleted,
+            report.ReclaimedBytes,
+            grace,
+            authorization.UserId);
+
+        return Ok(report);
+    }
+
+    private async Task<OrphanReportDto> SurveyAsync(Guid userId, int graceDays, CancellationToken cancellationToken)
+    {
+        var ops = await _repository.ReadPlaylistOpsAsync(userId, cancellationToken).ConfigureAwait(false);
+        var referenced = ArtworkSweep.ReferencedHashes(PlaylistProjection.Build(ops));
+        var blobs = await _images.ListAsync(userId, cancellationToken).ConfigureAwait(false);
+
+        return ArtworkSweep.Build(blobs, referenced, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), graceDays);
     }
 
     private static bool IsHash(string? value) =>
