@@ -237,6 +237,31 @@ public class SyncController : ControllerBase
             return StorageFailure(ex, "push");
         }
 
+        // Queue state is one row per device, replaced whole on every move of playback.
+        // Left alone it would append thousands of superseded rows a day; the losers carry
+        // nothing, since an overwritten snapshot of where a device was is not history.
+        var queueDevices = valid
+            .Where(op => op.Entity == SyncEntities.QueueState && !string.IsNullOrEmpty(op.EntityId))
+            .Select(op => op.EntityId!)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        if (queueDevices.Count > 0)
+        {
+            try
+            {
+                await _repository
+                    .CompactQueueStateAsync(authorization.UserId, queueDevices, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // The ops are already durably stored, so a failure to tidy up must not be
+                // reported as a failed push — the client would resend what already landed.
+                _logger.LogWarning(ex, "Could not compact queue state for {User}", authorization.UserId);
+            }
+        }
+
         return Ok(new PushResponse
         {
             Accepted = accepted,

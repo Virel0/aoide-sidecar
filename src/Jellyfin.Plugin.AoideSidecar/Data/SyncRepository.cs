@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using Jellyfin.Plugin.AoideSidecar.Api.Models;
+using Jellyfin.Plugin.AoideSidecar.Sync;
 using Microsoft.Data.Sqlite;
 
 namespace Jellyfin.Plugin.AoideSidecar.Data;
@@ -416,6 +417,108 @@ public sealed class SyncRepository
 
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         return result;
+    }
+
+    /// <summary>
+    /// Drops queue states a device has already superseded.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>queue_state</c> is one row per device, replaced whole every time playback moves.
+    /// In an append-only log that is thousands of rows a day per device, all but the last
+    /// carrying nothing: an older snapshot of where a device was is not history anyone can
+    /// use, it is a value that has been overwritten. Compacting on write is what keeps
+    /// resume-across-devices from becoming the fastest-growing table in the store.
+    /// </para>
+    /// <para>
+    /// Safe to delete unpulled rows here, unlike anywhere else: a device that has not
+    /// caught up wants the current queue, which is precisely the row that survives.
+    /// </para>
+    /// </remarks>
+    /// <param name="userId">The authenticated user.</param>
+    /// <param name="deviceEntityIds">The queue_state rows touched by this push.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>How many superseded rows were removed.</returns>
+    public async Task<int> CompactQueueStateAsync(
+        Guid userId,
+        IReadOnlyCollection<string> deviceEntityIds,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(deviceEntityIds);
+
+        if (deviceEntityIds.Count == 0)
+        {
+            return 0;
+        }
+
+        await using var connection = await _database.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = connection.BeginTransaction(deferred: false);
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            DELETE FROM ops
+            WHERE user_id = $u AND entity = 'queue_state' AND entity_id = $e
+              AND seq < (SELECT MAX(seq) FROM ops
+                         WHERE user_id = $u AND entity = 'queue_state' AND entity_id = $e);
+            """;
+        command.Parameters.AddWithValue("$u", ToKey(userId));
+        var entity = command.Parameters.Add("$e", SqliteType.Text);
+
+        var removed = 0;
+        foreach (var id in deviceEntityIds)
+        {
+            entity.Value = id;
+            removed += await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return removed;
+    }
+
+    /// <summary>
+    /// Reads the current queue on each of the user's devices.
+    /// </summary>
+    /// <remarks>
+    /// A direct read rather than something assembled from a pull. Handing playback from
+    /// one device to another is a foreground action with someone waiting on it, and
+    /// walking an op log to answer "what is playing on my phone" would make it as slow as
+    /// a full sync.
+    /// </remarks>
+    /// <param name="userId">The authenticated user.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>One entry per device, most recently updated first.</returns>
+    public async Task<IReadOnlyList<SyncOpDto>> GetQueueStatesAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        await using var connection = await _database.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT entity_id, MAX(seq), device_id, payload, created_at, received_at
+            FROM ops
+            WHERE user_id = $u AND entity = 'queue_state'
+            GROUP BY entity_id
+            ORDER BY 2 DESC;
+            """;
+        command.Parameters.AddWithValue("$u", ToKey(userId));
+
+        var states = new List<SyncOpDto>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            using var document = JsonDocument.Parse(reader.GetString(3));
+            states.Add(new SyncOpDto
+            {
+                Entity = SyncEntities.QueueState,
+                EntityId = reader.GetString(0),
+                Seq = reader.GetInt64(1),
+                DeviceId = reader.GetString(2),
+                Operation = SyncOperations.Upsert,
+                Payload = document.RootElement.Clone(),
+                CreatedAt = reader.GetInt64(4),
+                ReceivedAt = reader.GetInt64(5)
+            });
+        }
+
+        return states;
     }
 
     private static bool ProbeDirectory(string databasePath)

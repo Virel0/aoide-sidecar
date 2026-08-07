@@ -434,6 +434,41 @@ playlist in Aoide deletes its Jellyfin mirror.
 Unresolvable tracks are counted and skipped, never fatal — a file may simply be offline,
 and the entry returns on its own once the id resolves again.
 
+## Handing playback between your own devices
+
+Added in 1.7.0.0.
+
+```
+GET /aoide/queue
+```
+
+```json
+[ { "deviceId": "laptop", "isCurrentDevice": false, "ageSeconds": 12,
+    "receivedAt": 1786000000000, "updatedAt": 1786000000000,
+    "payload": { "deviceName": "Desk PC", "trackIds": ["…"], "position": 3, "elapsedMs": 41200 } } ]
+```
+
+One entry per device, **most recently updated first** — so the queue to offer is
+normally the first one that is not `isCurrentDevice`.
+
+Nothing new to write. Keep pushing `queue_state` ops exactly as before; this is a fast
+read of the rows already in the log, because handover is a foreground action with someone
+waiting on it and walking the op log to answer "what is my phone playing" would make it
+as slow as a full sync.
+
+**Superseded queue rows are compacted away on push.** `queue_state` is one row per device,
+replaced whole every time playback moves, so all but the latest are values that have been
+overwritten rather than history. Without this it would be the fastest-growing table in the
+store. Two consequences worth knowing:
+
+- Pull will not necessarily show every intermediate queue state. It was never meaningful
+  to replay them, and the current one always survives.
+- Push as often as playback genuinely changes. The log will not grow because of it.
+
+`ageSeconds` and `receivedAt` come from the **server's** clock on both sides. Judge
+freshness on those rather than on `updatedAt` — a device with a wrong clock would
+otherwise always claim to be the most recent and win every handover.
+
 ## Collaborative playlists
 
 Added in 1.6.0.0.
