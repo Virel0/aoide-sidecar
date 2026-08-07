@@ -12,10 +12,19 @@ understand what a playlist is. All of that happens on the client, against local 
 
 ## Status
 
-Implemented: the sync contract — `push`, `pull`, auth, storage, validation.
+Implemented: the sync contract (`push`, `pull`, auth, storage, validation), the
+`status` diagnostics endpoint, content-addressed playlist artwork, and one-way export of
+playlists into Jellyfin.
 
-Not yet implemented: one-way export of playlists as native Jellyfin playlists, and
-retention for `play_events`. Both are noted under [Next](#next).
+Not yet implemented: scheduled export (it is manual), retention for `play_events`, and
+sharing between users. All noted under [Next](#next).
+
+| endpoint | since |
+| -------- | ----- |
+| `POST /aoide/sync/push`, `GET /aoide/sync/pull` | 1.0.0.0 |
+| `GET /aoide/sync/status` | 1.0.2.0 |
+| `PUT`/`GET`/`HEAD /aoide/images/{sha256}` | 1.1.0.0 |
+| `POST /aoide/export/playlists` | 1.2.0.0 |
 
 ## Build
 
@@ -205,13 +214,9 @@ full history sync small.
 
 ## Next
 
-**Playlist export.** For playlists to show up in Jellyfin's own UI they need exporting
-as native Jellyfin playlists. That export must stay strictly one-way. If Jellyfin
-becomes a second writer, an exported edit returns as an inbound change and exports
-again — playlists that grow duplicates or oscillate. Mark exported playlists with a
-provider id, and treat an edit made in Jellyfin's UI as an explicit user-initiated
-import, never an automatic read-back. Smart playlists export as a snapshot of their
-current contents; Jellyfin has no concept of a rule.
+**Scheduled export.** `POST /aoide/export/playlists` is manual. A scheduled task would
+let it run unattended, which is worth having only once the manual form has been watched
+behaving on real data.
 
 **Retention.** `play_events` is append-only and grows without bound. Nothing prunes it
 yet. A device syncing from scratch replays the entire history, so this wants a decision

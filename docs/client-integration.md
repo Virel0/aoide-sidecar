@@ -330,6 +330,78 @@ The server recomputes the SHA-256 of every upload and rejects a mismatch with 40
 check is what makes the store trustworthy: without it a client could park arbitrary
 bytes under a hash every other device already believes it knows.
 
+## Exporting playlists into Jellyfin
+
+Added in 1.2.0.0; adoption by source id and artwork in 1.3.0.0.
+
+```
+POST /aoide/export/playlists
+```
+
+Runs for the calling user and returns what it did:
+
+```json
+{ "created": 0, "adopted": 1, "updated": 0, "unchanged": 3, "deleted": 0,
+  "skippedSmart": 1, "unresolvedTracks": 0,
+  "artworkApplied": 1, "artworkMissing": 0, "errors": [] }
+```
+
+Manual only — nothing runs on a timer, so an export happens because someone asked.
+
+### One-way, structurally
+
+The exporter reads the op log and writes to Jellyfin. **No code path turns a Jellyfin
+playlist into an op**, so a feedback loop is impossible here rather than merely avoided.
+
+That leaves exactly one rule, and it lives on the client: **never auto-import Jellyfin
+playlists.** Import is deliberate and user-initiated. An automatic read-back turns an
+exported edit into an inbound change, which exports again, and playlists grow duplicates
+on every cycle.
+
+Every managed playlist is stamped `ProviderIds["AoideSidecar"] = <aoide playlist id>`.
+Use it to tell a mirror from a real Jellyfin playlist when importing — skip anything
+carrying it. It is also the only thing the exporter will ever delete, so a playlist the
+user made in Jellyfin cannot be removed by a sync.
+
+### Adoption: source id first
+
+An Aoide playlist with no export mapping yet is matched against Jellyfin in this order:
+
+1. **`sourceJellyfinId`** in the payload — an exact identity. Adopted unless that
+   playlist is already stamped for a *different* Aoide playlist.
+2. **Exactly one unstamped playlist with the same name** — the fallback for playlists
+   created fresh in Aoide, where no source exists.
+3. Otherwise a new playlist is created.
+
+Keep `sourceJellyfinId` on anything imported from Jellyfin. It is right where a name
+cannot be: two server playlists sharing a name are still two distinct ids, and renaming
+the copy in Aoide before the first export still adopts the original and renames it
+rather than stranding it and making a duplicate.
+
+Both `sourceJellyfinId` and `source_jellyfin_id` are read.
+
+### Smart playlists are never exported
+
+They are rules, and Jellyfin has no concept of one. Evaluating them needs track metadata
+and play-event aggregates the sidecar does not hold, so they stay Aoide-only rather than
+exporting as a snapshot that silently goes stale. They appear as `skippedSmart`.
+
+### Artwork
+
+An exported playlist takes its Jellyfin cover from `image_hash`, fetched from the blob
+store. A hash the store does not hold yet counts as `artworkMissing` and is retried on
+the next run — so pushing the op before uploading the bytes is recoverable, not
+permanent. It is still worth uploading first.
+
+### What export overwrites
+
+Jellyfin becomes a mirror. Name and track membership are rewritten from Aoide on every
+run where they differ, so **edits made in Jellyfin's UI are overwritten**. Deleting a
+playlist in Aoide deletes its Jellyfin mirror.
+
+Unresolvable tracks are counted and skipped, never fatal — a file may simply be offline,
+and the entry returns on its own once the id resolves again.
+
 ## Invariants only the client can enforce
 
 The server cannot check these, and nothing will complain if you get them wrong:
