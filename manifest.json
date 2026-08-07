@@ -9,6 +9,14 @@
         "imageUrl": "",
         "versions": [
             {
+                "version": "1.7.0.0",
+                "changelog": "Resume playback across a user's devices, and compact superseded queue rows.",
+                "targetAbi": "10.11.0.0",
+                "sourceUrl": "https://github.com/Virel0/aoide-sidecar/releases/download/v1.7.0.0/aoide-sidecar_1.7.0.0.zip",
+                "checksum": "2a3b7d4a29b182658a59d09cc239f323",
+                "timestamp": "2026-08-07T22:26:46Z"
+            },
+            {
                 "version": "1.6.0.0",
                 "changelog": "Collaborative playlists: invite a Jellyfin user to a playlist and both can view and edit it.",
                 "targetAbi": "10.11.0.0",
