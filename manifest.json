@@ -9,6 +9,14 @@
         "imageUrl": "",
         "versions": [
             {
+                "version": "1.1.0.0",
+                "changelog": "Playlist artwork: content-addressed image store at /aoide/images/{sha256}.",
+                "targetAbi": "10.10.0.0",
+                "sourceUrl": "https://github.com/Virel0/aoide-sidecar/releases/download/v1.1.0.0/aoide-sidecar_1.1.0.0.zip",
+                "checksum": "aea9ee44965fc26d550579cfbf50eaf0",
+                "timestamp": "2026-08-07T01:36:03Z"
+            },
+            {
                 "version": "1.0.2.0",
                 "changelog": "Fix PascalCase responses (contract says camelCase), report storage failures as 503 with the real cause, and add GET /aoide/sync/status.",
                 "targetAbi": "10.10.0.0",
