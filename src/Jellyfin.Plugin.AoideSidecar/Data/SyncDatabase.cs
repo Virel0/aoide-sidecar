@@ -23,7 +23,7 @@ namespace Jellyfin.Plugin.AoideSidecar.Data;
 /// </remarks>
 public sealed class SyncDatabase
 {
-    private const int CurrentSchemaVersion = 1;
+    private const int CurrentSchemaVersion = 2;
 
     private static readonly string[] Migrations =
     {
@@ -48,6 +48,33 @@ public sealed class SyncDatabase
 
         -- The pull query, exactly: everything for one user past a cursor, in seq order.
         CREATE INDEX IF NOT EXISTS idx_ops_user_seq ON ops (user_id, seq);
+        """,
+
+        // v2 — playlist export bookkeeping, and artwork.
+        """
+        CREATE TABLE IF NOT EXISTS exported_playlists (
+            user_id           TEXT NOT NULL,
+            aoide_playlist_id TEXT NOT NULL,
+            jellyfin_item_id  TEXT NOT NULL,
+            content_hash      TEXT NOT NULL,
+            exported_at       INTEGER NOT NULL,
+            PRIMARY KEY (user_id, aoide_playlist_id)
+        );
+
+        -- Artwork is keyed by the SHA-256 of its own bytes, never by playlist id.
+        -- Content addressing makes an upload idempotent, lets identical artwork on two
+        -- playlists share one row, and means a client can cache a hash forever because
+        -- the bytes behind it can never change. Keeping the bytes out of the op log is
+        -- what stops a full history sync from carrying every image ever set.
+        CREATE TABLE IF NOT EXISTS playlist_images (
+            user_id    TEXT NOT NULL,
+            image_hash TEXT NOT NULL,
+            mime_type  TEXT NOT NULL,
+            bytes      BLOB NOT NULL,
+            size       INTEGER NOT NULL,
+            created_at INTEGER NOT NULL,
+            PRIMARY KEY (user_id, image_hash)
+        );
         """
     };
 

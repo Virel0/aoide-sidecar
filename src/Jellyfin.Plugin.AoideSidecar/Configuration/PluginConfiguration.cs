@@ -34,6 +34,15 @@ public class PluginConfiguration : BasePluginConfiguration
     public int MaxPayloadDepth { get; set; } = 32;
 
     /// <summary>
+    /// Gets or sets the largest accepted playlist image, in bytes.
+    /// </summary>
+    /// <remarks>
+    /// Artwork is stored whole and served back verbatim, so this is a real ceiling on
+    /// what one playlist costs. Cover art at a sensible resolution lands well under it.
+    /// </remarks>
+    public int MaxImageBytes { get; set; } = 5 * 1024 * 1024;
+
+    /// <summary>
     /// Gets or sets the number of ops returned by a pull that does not specify a limit.
     /// </summary>
     public int DefaultPullLimit { get; set; } = 500;

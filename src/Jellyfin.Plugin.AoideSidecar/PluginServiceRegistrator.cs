@@ -34,5 +34,6 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         });
 
         serviceCollection.AddSingleton<SyncRepository>();
+        serviceCollection.AddSingleton<PlaylistImageRepository>();
     }
 }

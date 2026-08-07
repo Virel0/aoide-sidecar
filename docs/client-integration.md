@@ -276,6 +276,60 @@ It is **not** a substitute for `updated_at`. A device that edits while offline a
 an hour later gets a *higher* seq than an edit made after it, so ordering by seq alone
 would let a stale edit win.
 
+## Playlist artwork
+
+Added in 1.1.0.0.
+
+**Artwork bytes never go in the op log.** Payloads are capped at 256 KB and every device
+replays the entire log, so images in it would make a full history sync grow without
+bound. The log carries a reference; the bytes travel separately.
+
+Add two fields to the `playlists` row. No server change is needed for this part —
+payloads are opaque, so this is yours to define:
+
+```json
+{ "id": "…", "name": "Late Night",
+  "image_hash": "8581e780…",   // lowercase hex SHA-256 of the bytes, or null
+  "image_mime": "image/png" }
+```
+
+### Endpoints
+
+```
+PUT  /aoide/images/{sha256}     body = raw bytes, Content-Type = image/jpeg|png|webp
+GET  /aoide/images/{sha256}
+HEAD /aoide/images/{sha256}     cheap "do I need to upload this?"
+```
+
+Same auth as everything else. Limits: 5 MB (configurable), and only JPEG, PNG or WebP.
+
+### Order matters
+
+**Upload the blob before pushing the op that references it.** Push the playlist row
+first and every other device sees an `image_hash` it cannot fetch until you catch up.
+
+Setting artwork:
+
+1. Compute the SHA-256 of the bytes.
+2. `HEAD` it — 200 means it is already stored and you can skip the upload entirely.
+3. `PUT` the bytes under that hash if it 404s.
+4. *Then* push the playlist op carrying `image_hash` and `image_mime`.
+
+Receiving artwork: an inbound playlist op whose `image_hash` you have no local copy of
+is a `GET` away. Cache it by hash on disk.
+
+### Why hashes rather than playlist ids
+
+The address *is* the content, which buys several things at once: re-uploading is a
+no-op rather than a conflict, two playlists sharing artwork store one copy, and a client
+can cache a hash forever because the bytes behind it can never change — responses carry
+`immutable` and a year-long `max-age`. Changing a playlist's art is just a new hash in
+the next op.
+
+The server recomputes the SHA-256 of every upload and rejects a mismatch with 400. That
+check is what makes the store trustworthy: without it a client could park arbitrary
+bytes under a hash every other device already believes it knows.
+
 ## Invariants only the client can enforce
 
 The server cannot check these, and nothing will complain if you get them wrong:
