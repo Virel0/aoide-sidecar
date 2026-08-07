@@ -95,6 +95,139 @@ public sealed class SyncRepository
         return status;
     }
 
+    /// <summary>
+    /// Reads every playlist and playlist-item op for a user, oldest first.
+    /// </summary>
+    /// <remarks>
+    /// The whole history rather than a window, because the projection has to know the
+    /// current state of rows that may not have been touched in a long time. Only two of
+    /// the six entities are read, which keeps this far smaller than the full log —
+    /// play_events, the one table that grows without bound, is not among them.
+    /// </remarks>
+    /// <param name="userId">The authenticated user.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The ops, in ascending sequence order.</returns>
+    public async Task<IReadOnlyList<SyncOpDto>> ReadPlaylistOpsAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        await using var connection = await _database.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT seq, op_id, device_id, entity, entity_id, operation, payload, created_at, received_at
+            FROM ops
+            WHERE user_id = $userId AND entity IN ('playlists', 'playlist_items')
+            ORDER BY seq;
+            """;
+        command.Parameters.AddWithValue("$userId", ToKey(userId));
+
+        var ops = new List<SyncOpDto>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            using var document = JsonDocument.Parse(reader.GetString(6));
+            ops.Add(new SyncOpDto
+            {
+                Seq = reader.GetInt64(0),
+                OpId = reader.GetString(1),
+                DeviceId = reader.GetString(2),
+                Entity = reader.GetString(3),
+                EntityId = reader.GetString(4),
+                Operation = reader.GetString(5),
+                Payload = document.RootElement.Clone(),
+                CreatedAt = reader.GetInt64(7),
+                ReceivedAt = reader.GetInt64(8)
+            });
+        }
+
+        return ops;
+    }
+
+    /// <summary>
+    /// Reads the map of exported playlists for a user.
+    /// </summary>
+    /// <param name="userId">The authenticated user.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Aoide playlist id to the Jellyfin item id and last exported content hash.</returns>
+    public async Task<Dictionary<string, (string JellyfinItemId, string ContentHash)>> GetExportMapAsync(
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await _database.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT aoide_playlist_id, jellyfin_item_id, content_hash
+            FROM exported_playlists WHERE user_id = $userId;
+            """;
+        command.Parameters.AddWithValue("$userId", ToKey(userId));
+
+        var map = new Dictionary<string, (string, string)>(StringComparer.Ordinal);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            map[reader.GetString(0)] = (reader.GetString(1), reader.GetString(2));
+        }
+
+        return map;
+    }
+
+    /// <summary>
+    /// Records that a playlist has been exported.
+    /// </summary>
+    /// <param name="userId">The authenticated user.</param>
+    /// <param name="aoidePlaylistId">The curation-store playlist id.</param>
+    /// <param name="jellyfinItemId">The Jellyfin playlist item id.</param>
+    /// <param name="contentHash">Hash of what was written, so an unchanged playlist is skipped next run.</param>
+    /// <param name="now">Milliseconds since epoch.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A task.</returns>
+    public async Task RecordExportAsync(
+        Guid userId,
+        string aoidePlaylistId,
+        string jellyfinItemId,
+        string contentHash,
+        long now,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await _database.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = connection.BeginTransaction(deferred: false);
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO exported_playlists (user_id, aoide_playlist_id, jellyfin_item_id, content_hash, exported_at)
+            VALUES ($u, $a, $j, $h, $t)
+            ON CONFLICT (user_id, aoide_playlist_id)
+            DO UPDATE SET jellyfin_item_id = $j, content_hash = $h, exported_at = $t;
+            """;
+        command.Parameters.AddWithValue("$u", ToKey(userId));
+        command.Parameters.AddWithValue("$a", aoidePlaylistId);
+        command.Parameters.AddWithValue("$j", jellyfinItemId);
+        command.Parameters.AddWithValue("$h", contentHash);
+        command.Parameters.AddWithValue("$t", now);
+
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Forgets an exported playlist.
+    /// </summary>
+    /// <param name="userId">The authenticated user.</param>
+    /// <param name="aoidePlaylistId">The curation-store playlist id.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A task.</returns>
+    public async Task ForgetExportAsync(Guid userId, string aoidePlaylistId, CancellationToken cancellationToken)
+    {
+        await using var connection = await _database.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = connection.BeginTransaction(deferred: false);
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "DELETE FROM exported_playlists WHERE user_id = $u AND aoide_playlist_id = $a;";
+        command.Parameters.AddWithValue("$u", ToKey(userId));
+        command.Parameters.AddWithValue("$a", aoidePlaylistId);
+
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
     private static bool ProbeDirectory(string databasePath)
     {
         try
