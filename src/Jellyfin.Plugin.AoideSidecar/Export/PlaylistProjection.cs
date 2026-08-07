@@ -106,8 +106,8 @@ public static class PlaylistProjection
                 continue;
             }
 
-            var playlistId = ReadString(op.Payload, "playlist_id");
-            var trackId = ReadString(op.Payload, "jellyfin_id");
+            var playlistId = ReadString(op.Payload, "playlist_id", "playlistId");
+            var trackId = ReadString(op.Payload, "jellyfin_id", "jellyfinId");
             if (playlistId is null || string.IsNullOrEmpty(trackId))
             {
                 continue;
@@ -136,7 +136,7 @@ public static class PlaylistProjection
             {
                 Id = id,
                 Name = ReadString(op.Payload, "name") ?? string.Empty,
-                IsSmart = ReadBool(op.Payload, "is_smart"),
+                IsSmart = ReadBool(op.Payload, "is_smart", "isSmart"),
                 Deleted = IsDeleted(op),
                 TrackIds = tracks,
 
@@ -144,10 +144,8 @@ public static class PlaylistProjection
                 // snake_case, but these two arrived named in camelCase, and a silent
                 // miss here would quietly cost an exact match and fall back to guessing
                 // by name — the exact failure the source id exists to remove.
-                SourceJellyfinId = ReadString(op.Payload, "sourceJellyfinId")
-                    ?? ReadString(op.Payload, "source_jellyfin_id"),
-                ImageHash = ReadString(op.Payload, "image_hash")
-                    ?? ReadString(op.Payload, "imageHash")
+                SourceJellyfinId = ReadString(op.Payload, "sourceJellyfinId", "source_jellyfin_id"),
+                ImageHash = ReadString(op.Payload, "image_hash", "imageHash")
             });
         }
 
@@ -167,7 +165,7 @@ public static class PlaylistProjection
     private static long Stamp(SyncOpDto op)
     {
         if (op.Payload.ValueKind == JsonValueKind.Object
-            && op.Payload.TryGetProperty("updated_at", out var updated)
+            && TryFind(op.Payload, new[] { "updated_at", "updatedAt" }, out var updated)
             && updated.ValueKind == JsonValueKind.Number
             && updated.TryGetInt64(out var value))
         {
@@ -181,9 +179,33 @@ public static class PlaylistProjection
         string.Equals(op.Operation, SyncOperations.Delete, StringComparison.Ordinal)
         || ReadBool(op.Payload, "deleted");
 
-    private static string? ReadString(JsonElement payload, string name)
+    /// <summary>
+    /// Finds the first property present under any accepted spelling.
+    /// </summary>
+    /// <remarks>
+    /// The design doc names these columns in snake_case but the client serialises them
+    /// in camelCase, and the server owns neither. A miss here is silent and severe: an
+    /// unread playlistId groups no members and an unread isSmart reads as false, so
+    /// export would emit empty playlists and push smart ones it must never touch.
+    /// Accepting both is what keeps that from turning on a naming convention.
+    /// </remarks>
+    private static bool TryFind(JsonElement payload, string[] names, out JsonElement value)
     {
-        if (!payload.TryGetProperty(name, out var value))
+        foreach (var name in names)
+        {
+            if (payload.TryGetProperty(name, out value))
+            {
+                return true;
+            }
+        }
+
+        value = default;
+        return false;
+    }
+
+    private static string? ReadString(JsonElement payload, params string[] names)
+    {
+        if (!TryFind(payload, names, out var value))
         {
             return null;
         }
@@ -198,9 +220,9 @@ public static class PlaylistProjection
 
     // Clients have written these as 0/1 and as true/false at different times; both are
     // the same fact, so both are accepted rather than one being silently ignored.
-    private static bool ReadBool(JsonElement payload, string name)
+    private static bool ReadBool(JsonElement payload, params string[] names)
     {
-        if (!payload.TryGetProperty(name, out var value))
+        if (!TryFind(payload, names, out var value))
         {
             return false;
         }

@@ -196,6 +196,57 @@ public class PlaylistProjectionTests
     }
 
     [Fact]
+    public void Reads_the_camelCase_payloads_the_client_actually_sends()
+    {
+        // Taken from real ops on a live server. The design doc names these columns in
+        // snake_case; the client serialises camelCase. Reading only snake_case fails
+        // silently and catastrophically — playlistId groups nothing, so every exported
+        // playlist comes out empty, and isSmart reads false, so smart playlists get
+        // pushed to Jellyfin when they must never be.
+        var result = PlaylistProjection.Build(new[]
+        {
+            Op(SyncEntities.Playlists, "p1", 1, """{"id":"p1","name":"Late Night","isSmart":false,"deleted":false,"updatedAt":500,"originDevice":"dev","sourceJellyfinId":"aa71a764","imageHash":"8581e780"}"""),
+            Op(SyncEntities.Playlists, "p2", 2, """{"id":"p2","name":"Jazz","isSmart":true,"deleted":false,"updatedAt":500}"""),
+            Op(SyncEntities.PlaylistItems, "i1", 3, """{"id":"i1","playlistId":"p1","jellyfinId":"aa71a76469e986510b6952fa2bd5b328","position":"a1","deleted":false,"updatedAt":500}"""),
+            Op(SyncEntities.PlaylistItems, "i2", 4, """{"id":"i2","playlistId":"p1","jellyfinId":"83297a62041d3e6a5942db68863f4f40","position":"a0","deleted":false,"updatedAt":500}""")
+        });
+
+        var normal = result.Single(p => p.Id == "p1");
+        Assert.Equal("Late Night", normal.Name);
+        Assert.False(normal.IsSmart);
+        Assert.Equal("aa71a764", normal.SourceJellyfinId);
+        Assert.Equal("8581e780", normal.ImageHash);
+        Assert.Equal(
+            new[] { "83297a62041d3e6a5942db68863f4f40", "aa71a76469e986510b6952fa2bd5b328" },
+            normal.TrackIds);
+
+        Assert.True(result.Single(p => p.Id == "p2").IsSmart);
+    }
+
+    [Fact]
+    public void A_camelCase_soft_delete_is_seen()
+    {
+        var result = PlaylistProjection.Build(new[]
+        {
+            Op(SyncEntities.Playlists, "p1", 1, """{"id":"p1","name":"Gone","deleted":true,"updatedAt":9}""")
+        });
+
+        Assert.True(Assert.Single(result).Deleted);
+    }
+
+    [Fact]
+    public void Later_camelCase_edit_still_wins_on_updatedAt()
+    {
+        var result = PlaylistProjection.Build(new[]
+        {
+            Op(SyncEntities.Playlists, "p1", 1, """{"id":"p1","name":"Newer","updatedAt":500}"""),
+            Op(SyncEntities.Playlists, "p1", 2, """{"id":"p1","name":"StaleOffline","updatedAt":100}""")
+        });
+
+        Assert.Equal("Newer", Assert.Single(result).Name);
+    }
+
+    [Fact]
     public void Unrelated_entities_are_ignored()
     {
         var result = PlaylistProjection.Build(new[]
