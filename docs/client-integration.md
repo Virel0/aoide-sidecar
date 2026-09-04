@@ -486,7 +486,7 @@ and from then on both accounts push edits to it and both receive the other's **t
 the pull they already make** — one loop, one cursor, no second sync path.
 
 ```
-GET    /aoide/shares                                → what I share out, and what is shared with me
+GET    /aoide/shares                                → shares owned by, and granted to, the caller
 POST   /aoide/shares  { playlistId, granteeUserId, canEdit }
 DELETE /aoide/shares/{playlistId}/{granteeUserId}
 ```
@@ -680,22 +680,18 @@ The server cannot check these, and nothing will complain if you get them wrong:
   "everything up to here", not "the next number". Do not treat a gap as data loss.
 - **Durability** — one fsync per push batch. When `accepted` comes back, it is on disk.
 
-## Not there yet
+## Not done
 
-Worth knowing before you build against something that does not exist:
-
-- **No sharing between users.** Ops are strictly scoped to the authenticated user, so
-  collaborative and public playlists have no server support yet. This needs an explicit
-  grant table, not a widened query.
-- **No `play_events` retention.** The log grows without bound and a fresh device
-  replays all of it. Fine now, needs a decision before it gets large.
-- **No playlist export to Jellyfin's UI.** When it lands it will be strictly one-way;
-  edits made in Jellyfin will need to be an explicit user-initiated import, never an
-  automatic read-back, or playlists oscillate.
-- **No `downloads` table.** "Per-device downloads with shared state" is on the Phase 2
-  list but has no schema in the design doc. If it needs to sync, it needs a table and an
-  entry in the server's entity allow-list — tell me and I will add it.
-- **Likes write-through.** The design has likes written through to Jellyfin when online.
-  That is currently unimplemented on the server side, so if the client is doing it
-  directly against Jellyfin's API, that is the behaviour — and it is idempotent, so
-  two devices doing it is harmless.
+- **No `downloads` table.** "Per-device downloads with shared state" is on the original
+  design's Phase 2 list but has no schema. If that state needs to sync it needs a client
+  table and a server allow-list entry; the server will advertise the entity in
+  `acceptedEntities` once it exists, and clients should gate on that as with any new
+  entity.
+- **Likes are relayed, not written through.** The design has likes written through to
+  Jellyfin when online. The server does nothing with a `likes` op beyond storing and
+  relaying it, so write-through, if wanted, is a client call against Jellyfin's own API —
+  idempotent, so two devices doing it is harmless.
+- **No public playlists.** Sharing is an explicit per-user grant. A playlist visible to
+  every user on the server is not implemented.
+- **Nothing destructive is scheduled.** Play-history pruning and artwork reclamation are
+  manual and report before they act, by design; see their sections above.
