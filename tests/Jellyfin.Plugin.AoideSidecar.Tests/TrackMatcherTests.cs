@@ -32,7 +32,8 @@ public class TrackMatcherTests
     [InlineData("Song - Radio Edit", "song")]
     [InlineData("Song - Part 2", "song part 2")]
     [InlineData("Don't Stop Me Now", "don t stop me now")]
-    [InlineData("Song!!! ... (x)", "song")]
+    [InlineData("Song!!! ... (x)", "song x")]
+    [InlineData("(What's the Story) Morning Glory?", "what s the story morning glory")]
     [InlineData("  spaced   out  ", "spaced out")]
     [InlineData("", "")]
     [InlineData(null, "")]
@@ -242,14 +243,18 @@ public class SharedMatchTableTests
     private static readonly string TablePath =
         Path.Combine(AppContext.BaseDirectory, "match-table.json");
 
+    /// <summary>A library row in the clients' table shape, keyed by <c>jellyfinId</c>.</summary>
+    public sealed record TableTrack(string? JellyfinId, string? Title, List<string>? Artists, string? Album, long? DurationMs, string? Isrc);
+
+    /// <summary>An import row in the clients' table shape.</summary>
+    public sealed record TableImport(string? Title, List<string>? Artists, string? Album, long? DurationMs, string? Isrc);
+
     /// <summary>
     /// One row: an import, a library, and the id expected — or null for "missing".
+    /// The table's shape is the clients' contract, so it is mapped here explicitly
+    /// rather than bound straight onto the matcher's own types.
     /// </summary>
-    public sealed record Row(
-        string Name,
-        ImportedTrack Import,
-        IReadOnlyList<LibraryTrack> Library,
-        string? Expected);
+    public sealed record Row(string Name, TableImport Import, List<TableTrack> Library, string? Expected);
 
     public static IEnumerable<object[]> Rows()
     {
@@ -260,7 +265,7 @@ public class SharedMatchTableTests
             // does; The_shared_table_is_present is what says so out loud.
             yield return new object[]
             {
-                new Row("table not yet present", new ImportedTrack(null, Array.Empty<string>(), null, null, null), Array.Empty<LibraryTrack>(), null)
+                new Row("table not yet present", new TableImport(null, null, null, null, null), new List<TableTrack>(), null)
             };
             yield break;
         }
@@ -276,8 +281,20 @@ public class SharedMatchTableTests
     [MemberData(nameof(Rows))]
     public void Agrees_with_the_clients(Row row)
     {
-        var match = new TrackMatcher(row.Library).Match(row.Import);
-        Assert.Equal(row.Expected, match?.Track.Id);
+        var library = row.Library
+            .Select(t => new LibraryTrack(t.JellyfinId ?? string.Empty, t.Title, t.Artists ?? new List<string>(), t.Album, t.DurationMs, t.Isrc))
+            .ToList();
+        var import = new ImportedTrack(row.Import.Title, row.Import.Artists ?? new List<string>(), row.Import.Album, row.Import.DurationMs, row.Import.Isrc);
+
+        var match = new TrackMatcher(library).Match(import);
+        var got = match?.Track.Id;
+        var detail = match is null
+            ? string.Empty
+            : $" (t={match.TitleScore:0.00} a={match.ArtistScore:0.00} d={match.DurationScore:0.00} conf={match.Confidence:0.00})";
+
+        Assert.True(
+            string.Equals(row.Expected, got, StringComparison.Ordinal),
+            $"{row.Name}: expected {row.Expected ?? "null"}, got {got ?? "null"}{detail}");
     }
 
     private readonly Xunit.Abstractions.ITestOutputHelper _output;

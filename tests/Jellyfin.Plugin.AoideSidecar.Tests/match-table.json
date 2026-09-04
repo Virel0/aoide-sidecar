@@ -1,0 +1,349 @@
+[
+  {
+    "name": "plain equal",
+    "import": {
+      "title": "Karma Police",
+      "artists": [
+        "Radiohead"
+      ],
+      "durationMs": 264000
+    },
+    "library": [
+      {
+        "jellyfinId": "lib-1",
+        "title": "Karma Police",
+        "artists": [
+          "Radiohead"
+        ],
+        "durationMs": 264066
+      }
+    ],
+    "expected": "lib-1"
+  },
+  {
+    "name": "dash suffix with a noise word is dropped",
+    "import": {
+      "title": "Karma Police - Remastered 2009",
+      "artists": [
+        "Radiohead"
+      ],
+      "durationMs": 264000
+    },
+    "library": [
+      {
+        "jellyfinId": "lib-2",
+        "title": "Karma Police",
+        "artists": [
+          "Radiohead"
+        ],
+        "durationMs": 264000
+      }
+    ],
+    "expected": "lib-2"
+  },
+  {
+    "name": "feat group dropped, diacritics folded, any artist pair",
+    "import": {
+      "title": "Crazy in Love (feat. Jay-Z)",
+      "artists": [
+        "Beyoncé",
+        "JAY-Z"
+      ],
+      "durationMs": 236000
+    },
+    "library": [
+      {
+        "jellyfinId": "lib-3",
+        "title": "Crazy In Love",
+        "artists": [
+          "Beyonce"
+        ],
+        "durationMs": 235000
+      }
+    ],
+    "expected": "lib-3"
+  },
+  {
+    "name": "a bracket group without a noise word is kept",
+    "import": {
+      "title": "(What's the Story) Morning Glory?",
+      "artists": [
+        "Oasis"
+      ],
+      "durationMs": 300000
+    },
+    "library": [
+      {
+        "jellyfinId": "lib-4",
+        "title": "(What's The Story) Morning Glory?",
+        "artists": [
+          "Oasis"
+        ],
+        "durationMs": 300000
+      }
+    ],
+    "expected": "lib-4"
+  },
+  {
+    "name": "26 seconds off is a different recording",
+    "import": {
+      "title": "Karma Police",
+      "artists": [
+        "Radiohead"
+      ],
+      "durationMs": 264000
+    },
+    "library": [
+      {
+        "jellyfinId": "lib-5",
+        "title": "Karma Police",
+        "artists": [
+          "Radiohead"
+        ],
+        "durationMs": 290000
+      }
+    ],
+    "expected": null
+  },
+  {
+    "name": "12 seconds off is a different edit, still accepted",
+    "import": {
+      "title": "Karma Police",
+      "artists": [
+        "Radiohead"
+      ],
+      "durationMs": 264000
+    },
+    "library": [
+      {
+        "jellyfinId": "lib-6",
+        "title": "Karma Police",
+        "artists": [
+          "Radiohead"
+        ],
+        "durationMs": 276000
+      }
+    ],
+    "expected": "lib-6"
+  },
+  {
+    "name": "unknown duration on one side is not held against it",
+    "import": {
+      "title": "Karma Police",
+      "artists": [
+        "Radiohead"
+      ],
+      "durationMs": null
+    },
+    "library": [
+      {
+        "jellyfinId": "lib-7",
+        "title": "Karma Police",
+        "artists": [
+          "Radiohead"
+        ],
+        "durationMs": 264000
+      }
+    ],
+    "expected": "lib-7"
+  },
+  {
+    "name": "artist words all inside the other's still count",
+    "import": {
+      "title": "Karma Police",
+      "artists": [
+        "Radiohead"
+      ],
+      "durationMs": 264000
+    },
+    "library": [
+      {
+        "jellyfinId": "lib-8",
+        "title": "Karma Police",
+        "artists": [
+          "Radiohead Tribute Band"
+        ],
+        "durationMs": 264000
+      }
+    ],
+    "expected": "lib-8"
+  },
+  {
+    "name": "same title, different artist",
+    "import": {
+      "title": "Karma Police",
+      "artists": [
+        "Radiohead"
+      ],
+      "durationMs": 264000
+    },
+    "library": [
+      {
+        "jellyfinId": "lib-9",
+        "title": "Karma Police",
+        "artists": [
+          "Coldplay"
+        ],
+        "durationMs": 264000
+      }
+    ],
+    "expected": null
+  },
+  {
+    "name": "untagged artist, exact title: trusted",
+    "import": {
+      "title": "Karma Police",
+      "artists": [
+        "Radiohead"
+      ],
+      "durationMs": 264000
+    },
+    "library": [
+      {
+        "jellyfinId": "lib-10",
+        "title": "Karma Police",
+        "artists": [],
+        "durationMs": 264000
+      }
+    ],
+    "expected": "lib-10"
+  },
+  {
+    "name": "untagged artist, title exact after noise removal",
+    "import": {
+      "title": "Karma Police (Live)",
+      "artists": [
+        "Radiohead"
+      ],
+      "durationMs": 264000
+    },
+    "library": [
+      {
+        "jellyfinId": "lib-11",
+        "title": "Karma Police",
+        "artists": [],
+        "durationMs": 264000
+      }
+    ],
+    "expected": "lib-11"
+  },
+  {
+    "name": "untagged artist, inexact title: not trusted",
+    "import": {
+      "title": "Karma Polic",
+      "artists": [
+        "Radiohead"
+      ],
+      "durationMs": 264000
+    },
+    "library": [
+      {
+        "jellyfinId": "lib-12",
+        "title": "Karma Police",
+        "artists": [],
+        "durationMs": 264000
+      }
+    ],
+    "expected": null
+  },
+  {
+    "name": "ampersand is 'and'",
+    "import": {
+      "title": "Rock & Roll",
+      "artists": [
+        "Led Zeppelin"
+      ],
+      "durationMs": 220000
+    },
+    "library": [
+      {
+        "jellyfinId": "lib-13",
+        "title": "Rock and Roll",
+        "artists": [
+          "Led Zeppelin"
+        ],
+        "durationMs": 220000
+      }
+    ],
+    "expected": "lib-13"
+  },
+  {
+    "name": "one of two words differs: 1/3 overlap",
+    "import": {
+      "title": "Song 2",
+      "artists": [
+        "Blur"
+      ],
+      "durationMs": 122000
+    },
+    "library": [
+      {
+        "jellyfinId": "lib-14",
+        "title": "Song 3",
+        "artists": [
+          "Blur"
+        ],
+        "durationMs": 122000
+      }
+    ],
+    "expected": null
+  },
+  {
+    "name": "library side carries the noise suffix",
+    "import": {
+      "title": "The Less I Know the Better",
+      "artists": [
+        "Tame Impala"
+      ],
+      "durationMs": 216000
+    },
+    "library": [
+      {
+        "jellyfinId": "lib-15",
+        "title": "The Less I Know The Better - Single Version",
+        "artists": [
+          "Tame Impala"
+        ],
+        "durationMs": 216000
+      }
+    ],
+    "expected": "lib-15"
+  },
+  {
+    "name": "best picks the closest accepted candidate, not the first",
+    "import": {
+      "title": "Karma Police",
+      "artists": [
+        "Radiohead"
+      ],
+      "durationMs": 264000
+    },
+    "library": [
+      {
+        "jellyfinId": "lib-16a",
+        "title": "Karma Police",
+        "artists": [
+          "Radiohead"
+        ],
+        "durationMs": 276000
+      },
+      {
+        "jellyfinId": "lib-16b",
+        "title": "Karma Police",
+        "artists": [
+          "Radiohead"
+        ],
+        "durationMs": 264000
+      },
+      {
+        "jellyfinId": "lib-16c",
+        "title": "Karma Police",
+        "artists": [
+          "Coldplay"
+        ],
+        "durationMs": 264000
+      }
+    ],
+    "expected": "lib-16b"
+  }
+]

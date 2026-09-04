@@ -81,6 +81,7 @@ public static partial class TrackNormalizer
         "radio", "single", "bonus",
         "anniversary", "explicit", "clean",
         "extended", "reissue",
+        "with", "from", "original", "edition",
     };
 
     [GeneratedRegex(@"\([^)]*\)|\[[^\]]*\]|\{[^}]*\}")]
@@ -99,7 +100,10 @@ public static partial class TrackNormalizer
         }
 
         var text = FoldDiacritics(raw.ToLowerInvariant()).Replace("&", " and ", StringComparison.Ordinal);
-        text = BracketedGroups().Replace(text, " ");
+
+        // "(feat. Jay-Z)" and "[Remastered]" are decoration; "(What's the Story)" is part
+        // of the title. The same noise-word test decides both this and " - " suffixes.
+        text = BracketedGroups().Replace(text, m => Words(m.Value).Overlaps(NoiseWords) ? " " : m.Value);
 
         // " - Remastered 2011", " - Live at Wembley": decoration Spotify appends to the
         // title. " - Part 2" is not, because none of its words are noise, so it stays.

@@ -561,9 +561,13 @@ just believed.
 
 ### The rules, exactly as the clients have them
 
-Normalise: lower-case, fold diacritics, `&` to `and`, drop bracketed groups, drop
-` - ` suffixes containing a noise word (feat, remaster, remix, live, version, edit,
-deluxe, …), keep only letters, digits and spaces. Score each field from word sets —
+Normalise: lower-case, fold diacritics, `&` to `and`, drop bracketed groups **and** ` - `
+suffixes that contain a noise word — a bracket group without one, like the
+"(What's the Story)" in Morning Glory, is part of the title and stays — then keep only
+letters, digits and spaces. The noise-word list is one list across all three codebases:
+feat, featuring, ft, remaster(ed), remix(ed), mix, live, version, edit(ed), deluxe, mono,
+stereo, acoustic, instrumental, demo, radio, single, bonus, anniversary, explicit, clean,
+extended, reissue, with, from, original, edition. Score each field from word sets —
 equal 1, one a subset of the other 0.9, otherwise Jaccard; artist is the best over every
 pair of credited names. Duration: within 5 s 1, within 15 s 0.8, beyond that reject;
 unknown on either side 0.9. Accept when title ≥ 0.75, artist ≥ 0.7 and duration did not
@@ -573,9 +577,12 @@ by 0.5·title + 0.35·artist + 0.15·duration.
 An ISRC that matches on both sides is decisive on its own — rare in Jellyfin tags,
 certain when present.
 
-The server's implementation is verified against the spec above, and against the same
-15-row table the two clients share once that file is in the repo, so the phone and the
-server cannot disagree about what is missing.
+The server's implementation is verified against the spec above and against the 16-row
+table the two clients share, which is a hard test gate here. The canonical copy lives in
+the desktop repo at `docs/match-table.json`; the sidecar carries a copy at
+`tests/Jellyfin.Plugin.AoideSidecar.Tests/match-table.json`. **When the table changes,
+copy it over** — a stale copy is the one way the phone and the server could quietly
+disagree about what is missing.
 
 ## Invariants only the client can enforce
 

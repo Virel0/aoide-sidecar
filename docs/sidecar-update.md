@@ -169,15 +169,16 @@ isrc), one result per row out, with `jellyfinId` or null plus the three componen
 Same normalisation, same field scores, same floors, same rank. ISRC short-circuits when
 both sides have one. 5000 rows per call.
 
-Two things to line up:
+Both lined up as of 1.8.1.0:
 
-- **The noise-word list.** I used feat/featuring/ft, remaster(ed), remix(ed)/mix, live,
-  version, edit(ed), deluxe, mono/stereo, acoustic, instrumental, demo, radio, single,
-  bonus, anniversary, explicit, clean, extended, reissue. If yours differs, send the list
-  and I will match it exactly — this is the one place a divergence is silent.
-- **The 15-row table.** The harness is in place and reads
-  `tests/…/match-table.json` (rows of `{ name, import, library[], expected }`). It warns
-  loudly in test output until the file exists. Send it and it becomes a hard gate.
+- **The noise-word list is one list.** Yours plus mine: with, from, original, edition
+  added here; extended, reissue adopted there.
+- **The 16-row table is a hard gate.** It caught one real divergence before it shipped:
+  I had read "drop bracketed groups and ` - ` suffixes containing a noise word" with the
+  qualifier on suffixes only, and was dropping every bracket group. Now a bracket group
+  is kept unless it contains a noise word, exactly as you have it. The canonical table is
+  `aoide-desktop/docs/match-table.json`; the sidecar carries a copy under `tests/` — copy
+  it over whenever it changes.
 
 Clients try the endpoint first and fall back locally, as you proposed.
 
