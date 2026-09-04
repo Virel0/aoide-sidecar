@@ -87,7 +87,8 @@ public sealed class RetentionTests : IDisposable
                 Op("i1", SyncEntities.PlaylistItems),
                 Op("l1", SyncEntities.Likes),
                 Op("f1", SyncEntities.Folders),
-                Op("q1", SyncEntities.QueueState)
+                Op("q1", SyncEntities.QueueState),
+                Op("t1", SyncEntities.TrackFlags)
             },
             receivedAt: 1000,
             default);
@@ -101,6 +102,7 @@ public sealed class RetentionTests : IDisposable
         Assert.Equal(1, counts[SyncEntities.Playlists]);
         Assert.Equal(1, counts[SyncEntities.Likes]);
         Assert.Equal(1, counts[SyncEntities.QueueState]);
+        Assert.Equal(1, counts[SyncEntities.TrackFlags]);
     }
 
     [Fact]

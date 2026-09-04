@@ -165,6 +165,17 @@ public class PullResponse
 /// </summary>
 public class SyncStatusDto
 {
+    /// <summary>Gets or sets the plugin version answering.</summary>
+    [JsonPropertyName("pluginVersion")]
+    public string? PluginVersion { get; set; }
+
+    /// <summary>
+    /// Gets or sets the entity names this server accepts on push. Check before pushing
+    /// an entity the server might predate; hold those ops locally until it appears.
+    /// </summary>
+    [JsonPropertyName("acceptedEntities")]
+    public IReadOnlyList<string> AcceptedEntities { get; set; } = Array.Empty<string>();
+
     /// <summary>Gets or sets the full path of the SQLite file the plugin is using.</summary>
     [JsonPropertyName("databasePath")]
     public string? DatabasePath { get; set; }

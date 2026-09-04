@@ -59,6 +59,14 @@ Diagnostics, same auth as everything else:
   "directoryWritable": true, "cursor": 2, "opCount": 2 }
 ```
 
+Since 1.9.0.0 it also carries `pluginVersion` and **`acceptedEntities`** — the exact list
+push will accept. The entity list is an allow-list: an op naming an entity the server
+does not know is *rejected*, and the contract says a rejected op is dead. So a client
+shipped ahead of the server would quarantine real user data. **Before pushing an entity
+the server might predate, check `acceptedEntities`; if it is absent, hold those ops
+locally — neither push nor quarantine — until it appears.** That makes every future
+entity safe to roll out in either order.
+
 `writable: false` with `error` set means pushes will fail while pulls keep working.
 `journalMode` should read `wal`; `delete` means SQLite declined WAL, which happens on
 filesystems without shared-memory support and makes every write need a journal file
@@ -169,7 +177,7 @@ These are enforced. Most are exactly the design doc, but the string matching is 
 
 | rule | detail |
 | ---- | ------ |
-| `entity` must be one of | `playlists`, `playlist_items`, `folders`, `likes`, `play_events`, `queue_state` |
+| `entity` must be one of | `playlists`, `playlist_items`, `folders`, `likes`, `play_events`, `queue_state`, `track_flags` (1.9.0.0) — or whatever `acceptedEntities` says, see below |
 | `tracks` is refused | it is a per-device cache; rebuild it from this device's own Jellyfin connection |
 | `operation` must be | `upsert` or `delete` — **lowercase, case-sensitive**. `UPSERT` is rejected |
 | `payload` must be | a JSON **object**, the full row after the change. Not an array, string or null |
@@ -583,6 +591,19 @@ the desktop repo at `docs/match-table.json`; the sidecar carries a copy at
 `tests/Jellyfin.Plugin.AoideSidecar.Tests/match-table.json`. **When the table changes,
 copy it over** — a stale copy is the one way the phone and the server could quietly
 disagree about what is missing.
+
+## Taste flags
+
+Accepted since 1.9.0.0. `track_flags` is a personal entity and needs nothing further from
+the server: it carries no playlist id, so it can never reach a collaborator through a
+shared playlist; retention only ever touches `play_events`; compaction only
+`queue_state`; export only playlists. The payload is opaque here as everywhere — the
+per-field `fieldUpdatedAt` merge and the `(user, jellyfinId)` dedupe are the client's,
+exactly as with `playlists` and `likes`.
+
+Gate the feature on `acceptedEntities` containing `track_flags`. Ship the server first
+if you can; if you cannot, the gate is what keeps a flag set against an older server
+from being quarantined as garbage.
 
 ## Invariants only the client can enforce
 

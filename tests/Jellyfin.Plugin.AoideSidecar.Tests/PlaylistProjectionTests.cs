@@ -253,7 +253,8 @@ public class PlaylistProjectionTests
         {
             Playlist("p1", 1, "Late Night", 100),
             Op(SyncEntities.PlayEvents, "e1", 2, """{"id":"e1","ms_played":1000}"""),
-            Op(SyncEntities.Likes, "l1", 3, """{"id":"l1","liked":1}""")
+            Op(SyncEntities.Likes, "l1", 3, """{"id":"l1","liked":1}"""),
+            Op(SyncEntities.TrackFlags, "t1", 4, """{"id":"t1","jellyfinId":"x","notInterested":true}""")
         });
 
         Assert.Single(result);

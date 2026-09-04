@@ -33,6 +33,12 @@ public static class SyncEntities
     /// <summary>One row per device, for resume-across-devices.</summary>
     public const string QueueState = "queue_state";
 
+    /// <summary>
+    /// Per-track taste flags: "not interested" and "don't count this". Personal, never
+    /// exported, never shared — a flag is a fact about one listener's taste.
+    /// </summary>
+    public const string TrackFlags = "track_flags";
+
     /// <summary>The local-only track cache, named here so it can be rejected with a useful message.</summary>
     public const string Tracks = "tracks";
 
@@ -43,8 +49,21 @@ public static class SyncEntities
         Folders,
         Likes,
         PlayEvents,
-        QueueState
+        QueueState,
+        TrackFlags
     };
+
+    /// <summary>
+    /// Gets every entity this server will accept on push, in a stable order.
+    /// </summary>
+    /// <remarks>
+    /// Advertised through <c>/aoide/sync/status</c> so a client can discover whether the
+    /// server it is talking to knows an entity before pushing one. Without that, a
+    /// client shipped ahead of the server would push, be told "unknown entity", and —
+    /// following the contract — quarantine real user data as permanently rejected.
+    /// </remarks>
+    public static IReadOnlyList<string> All { get; } =
+        SyncableEntities.OrderBy(e => e, StringComparer.Ordinal).ToArray();
 
     /// <summary>
     /// Gets a value indicating whether ops for the given table are relayed by the sidecar.

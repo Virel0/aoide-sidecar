@@ -182,6 +182,22 @@ Both lined up as of 1.8.1.0:
 
 Clients try the endpoint first and fall back locally, as you proposed.
 
+## 10. Taste flags: the answer is "it rejects", and now it also advertises
+
+**The sidecar rejects an unknown entity.** The list has been an allow-list from the first
+release, on purpose: an unrecognised entity is refused loudly at the boundary rather than
+accumulating in the log as rows no client knows how to apply. `track_flags` is in the
+list as of **1.9.0.0**, and nothing else was needed — it is personal, so the existing
+rules already keep it out of shared playlists, out of retention, out of export.
+
+The rollout trap, closed: a client shipped before the server would push, be told
+"Unknown entity", and — per the contract — quarantine real flags forever. So
+`/aoide/sync/status` now returns **`acceptedEntities`** (and `pluginVersion`). Gate on it:
+hold `track_flags` ops locally until the server lists the entity. Server-first is still
+the easy order, but the gate makes either order safe, for this entity and every one after.
+
+Your spec's other two answers, confirmed: export nothing; retention keeps it.
+
 ## Endpoint summary
 
 | endpoint | since | what it is for |

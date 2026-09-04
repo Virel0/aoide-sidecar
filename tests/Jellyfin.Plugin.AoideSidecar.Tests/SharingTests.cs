@@ -236,4 +236,34 @@ public sealed class SharingTests : IDisposable
         Assert.Single(await _sharing.ListSharesAsync(alice, default));
         Assert.Single(await _sharing.ListSharesAsync(bob, default));
     }
+
+    [Fact]
+    public void Taste_flags_belong_to_no_playlist()
+    {
+        var op = PlaylistOp("f1", "p1");
+        op.Entity = SyncEntities.TrackFlags;
+
+        Assert.Null(SharingRepository.PlaylistIdOf(op));
+    }
+
+    [Fact]
+    public async Task Taste_flags_are_never_visible_to_a_collaborator()
+    {
+        // A flag is a fact about one listener's taste. Sharing a playlist must not
+        // leak which of its tracks the owner has marked "not interested".
+        var alice = Guid.NewGuid();
+        var bob = Guid.NewGuid();
+
+        var flag = PlaylistOp("a-flag", "p1");
+        flag.Entity = SyncEntities.TrackFlags;
+        flag.EntityId = "flag-1";
+
+        await _repository.AppendAsync(alice, "alice-phone", new[] { PlaylistOp("a1", "p1"), flag }, 1, default);
+        await _sharing.ClaimOwnershipAsync(new[] { "p1" }, alice, 1, default);
+        await _sharing.ShareAsync("p1", bob, canEdit: true, 2, default);
+
+        var bobSees = await _repository.ReadAsync(bob, 0, 50, default);
+
+        Assert.Equal(new[] { "a1" }, bobSees.Ops.Select(o => o.OpId));
+    }
 }

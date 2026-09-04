@@ -289,6 +289,8 @@ public class SyncController : ControllerBase
         }
 
         var status = await _repository.GetStatusAsync(authorization.UserId, cancellationToken).ConfigureAwait(false);
+        status.PluginVersion = Plugin.Instance?.Version?.ToString();
+        status.AcceptedEntities = SyncEntities.All;
         if (!status.Writable)
         {
             _logger.LogError(

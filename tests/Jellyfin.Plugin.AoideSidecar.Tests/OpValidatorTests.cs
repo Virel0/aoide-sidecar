@@ -36,6 +36,7 @@ public class OpValidatorTests
     [InlineData(SyncEntities.Likes)]
     [InlineData(SyncEntities.PlayEvents)]
     [InlineData(SyncEntities.QueueState)]
+    [InlineData(SyncEntities.TrackFlags)]
     public void Accepts_every_syncable_entity(string entity)
     {
         var op = Valid();
@@ -251,5 +252,20 @@ public class OpValidatorTests
         var configured = new Configuration.PluginConfiguration().MaxPayloadDepth;
 
         Assert.InRange(configured, 1, 64);
+    }
+
+    [Fact]
+    public void Every_accepted_entity_is_advertised_and_nothing_else_is()
+    {
+        // The list a client reads from /aoide/sync/status must be exactly the list the
+        // validator enforces, or discovery would promise something push then refuses.
+        foreach (var entity in SyncEntities.All)
+        {
+            Assert.True(SyncEntities.IsSyncable(entity), entity);
+        }
+
+        Assert.Contains(SyncEntities.TrackFlags, SyncEntities.All);
+        Assert.DoesNotContain(SyncEntities.Tracks, SyncEntities.All);
+        Assert.Equal(SyncEntities.All.OrderBy(e => e, StringComparer.Ordinal), SyncEntities.All);
     }
 }
