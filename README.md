@@ -77,11 +77,10 @@ has synced, and it prints the commands to wipe the database afterwards.
 
 ## For app developers
 
-- [docs/client-integration.md](docs/client-integration.md) — the contract, in full: the
-  sync loop, cursors, every rule that gets an op rejected, the failure modes that are
-  silent rather than loud, and each feature's wire shape.
-- [docs/sidecar-update.md](docs/sidecar-update.md) — a running changelog written for the
-  client side, with the decisions and their reasons.
+[docs/client-integration.md](docs/client-integration.md) is the contract in full: the
+sync loop, cursors, every rule that gets an op rejected, the failure modes that are
+silent rather than loud, and each feature's wire shape. Per-release notes are in the
+[GitHub releases](https://github.com/Virel0/aoide-sidecar/releases).
 
 Clients discover what a server accepts from `GET /aoide/sync/status`, which lists
 `acceptedEntities` and `pluginVersion`. Hold ops for an entity the server does not yet
