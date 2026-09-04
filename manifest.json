@@ -9,6 +9,14 @@
         "imageUrl": "",
         "versions": [
             {
+                "version": "1.8.1.0",
+                "changelog": "Align matching rules with the clients: bracket groups are dropped only when they contain a noise word; unified noise-word list; the shared 16-row table is now a hard test gate.",
+                "targetAbi": "10.11.0.0",
+                "sourceUrl": "https://github.com/Virel0/aoide-sidecar/releases/download/v1.8.1.0/aoide-sidecar_1.8.1.0.zip",
+                "checksum": "c2dff980f2602888f773ba890580e4cc",
+                "timestamp": "2026-09-04T16:31:53Z"
+            },
+            {
                 "version": "1.8.0.0",
                 "changelog": "POST /aoide/match: match an imported track list (Spotify export) against the library, using the rules the clients share.",
                 "targetAbi": "10.11.0.0",
