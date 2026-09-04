@@ -162,6 +162,25 @@ would have been ambiguous on exactly those.
 
 ---
 
+## 9. New: `POST /aoide/match` — the Spotify import matcher
+
+Built to your spec: `ImportedTrack` in (title, artists[], optional album, durationMs,
+isrc), one result per row out, with `jellyfinId` or null plus the three component scores.
+Same normalisation, same field scores, same floors, same rank. ISRC short-circuits when
+both sides have one. 5000 rows per call.
+
+Two things to line up:
+
+- **The noise-word list.** I used feat/featuring/ft, remaster(ed), remix(ed)/mix, live,
+  version, edit(ed), deluxe, mono/stereo, acoustic, instrumental, demo, radio, single,
+  bonus, anniversary, explicit, clean, extended, reissue. If yours differs, send the list
+  and I will match it exactly — this is the one place a divergence is silent.
+- **The 15-row table.** The harness is in place and reads
+  `tests/…/match-table.json` (rows of `{ name, import, library[], expected }`). It warns
+  loudly in test output until the file exists. Send it and it becomes a hard gate.
+
+Clients try the endpoint first and fall back locally, as you proposed.
+
 ## Endpoint summary
 
 | endpoint | since | what it is for |
@@ -175,6 +194,7 @@ would have been ambiguous on exactly those.
 | `GET`/`POST /aoide/retention…` | 1.5.0.0 | play-history retention |
 | `GET`/`POST`/`DELETE /aoide/shares` | 1.6.0.0 | collaborative playlists |
 | `GET /aoide/queue` | 1.7.0.0 | resume across devices |
+| `POST /aoide/match` | 1.8.0.0 | match an imported track list against the library |
 
 All take the same Jellyfin user token. An admin API key returns 401 — it carries no user
 id, and every op is scoped to a user.

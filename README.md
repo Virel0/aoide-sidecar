@@ -32,6 +32,7 @@ the plugin's configuration page.
 | `GET /aoide/retention`, `POST /aoide/retention/prune` | 1.5.0.0 |
 | `GET`/`POST`/`DELETE /aoide/shares` | 1.6.0.0 |
 | `GET /aoide/queue` | 1.7.0.0 |
+| `POST /aoide/match` | 1.8.0.0 |
 
 ## Build
 

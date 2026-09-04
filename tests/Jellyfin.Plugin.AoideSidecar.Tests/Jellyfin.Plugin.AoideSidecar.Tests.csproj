@@ -23,6 +23,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Include="match-table.json" Condition="Exists('match-table.json')" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\Jellyfin.Plugin.AoideSidecar\Jellyfin.Plugin.AoideSidecar.csproj" />
   </ItemGroup>
 

@@ -521,6 +521,62 @@ authorship and stay in their own stream — and it does not reach into their dev
 delete a playlist they already synced. Drop it locally when it disappears from
 `/aoide/shares`.
 
+## Matching an imported track list
+
+Added in 1.8.0.0.
+
+```
+POST /aoide/match
+```
+
+The hard part of a Spotify import is not parsing the export, it is finding a thousand
+rows in a library of twenty thousand. From a phone that is a thousand round trips; on the
+server the library is already in memory, so it is one call. **Try this first and fall
+back to local matching when it is unreachable** — the rules are identical, so the two
+paths agree about what is missing.
+
+Send your `ImportedTrack` rows as a JSON array, up to **5000** per call (400 above that;
+split the import):
+
+```json
+[ { "title": "bad idea right?", "artists": ["Olivia Rodrigo"],
+    "album": "GUTS", "durationMs": 184000, "isrc": "USUG12305108" } ]
+```
+
+`album` and `isrc` are optional — the Spotify embed page gives neither, so the fuzzy
+path is the main path, not the edge case. `artists` is every credited name.
+
+```json
+{ "matched": 1, "librarySize": 4213,
+  "results": [ { "jellyfinId": "…", "confidence": 0.92,
+                 "titleScore": 0.9, "artistScore": 1, "durationScore": 0.8,
+                 "title": "bad idea right?", "artists": ["Olivia Rodrigo"],
+                 "album": "GUTS", "durationMs": 184000 } ] }
+```
+
+`results` is aligned with your rows, in order; a row that matched nothing is `null`. The
+matched track's own metadata comes back so the UI can show what was chosen, and the
+three component scores are there so a surprising match can be explained rather than
+just believed.
+
+### The rules, exactly as the clients have them
+
+Normalise: lower-case, fold diacritics, `&` to `and`, drop bracketed groups, drop
+` - ` suffixes containing a noise word (feat, remaster, remix, live, version, edit,
+deluxe, …), keep only letters, digits and spaces. Score each field from word sets —
+equal 1, one a subset of the other 0.9, otherwise Jaccard; artist is the best over every
+pair of credited names. Duration: within 5 s 1, within 15 s 0.8, beyond that reject;
+unknown on either side 0.9. Accept when title ≥ 0.75, artist ≥ 0.7 and duration did not
+reject; **with no artist to compare on either side, only an exact title matches**. Rank
+by 0.5·title + 0.35·artist + 0.15·duration.
+
+An ISRC that matches on both sides is decisive on its own — rare in Jellyfin tags,
+certain when present.
+
+The server's implementation is verified against the spec above, and against the same
+15-row table the two clients share once that file is in the repo, so the phone and the
+server cannot disagree about what is missing.
+
 ## Invariants only the client can enforce
 
 The server cannot check these, and nothing will complain if you get them wrong:
