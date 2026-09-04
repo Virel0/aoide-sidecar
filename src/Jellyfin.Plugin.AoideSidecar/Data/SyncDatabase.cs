@@ -23,7 +23,7 @@ namespace Jellyfin.Plugin.AoideSidecar.Data;
 /// </remarks>
 public sealed class SyncDatabase
 {
-    private const int CurrentSchemaVersion = 4;
+    private const int CurrentSchemaVersion = 5;
 
     private static readonly string[] Migrations =
     {
@@ -135,6 +135,24 @@ public sealed class SyncDatabase
         );
 
         CREATE INDEX IF NOT EXISTS idx_shares_grantee ON playlist_shares (grantee_user_id);
+        """,
+
+        // v5 — where each file's sound starts and stops.
+        //
+        // Global rather than per user: a measurement is a fact about the file. Keyed by
+        // the file's modification time so a replaced file is measured again, and a
+        // failed measurement is kept with its error so one unreadable file does not cost
+        // a decode on every request that mentions it.
+        """
+        CREATE TABLE IF NOT EXISTS sound_bounds (
+            jellyfin_id    TEXT PRIMARY KEY,
+            mtime_ticks    INTEGER NOT NULL,
+            sound_start_ms INTEGER,
+            sound_end_ms   INTEGER,
+            source         TEXT NOT NULL,
+            error          TEXT,
+            measured_at    INTEGER NOT NULL
+        );
         """
     };
 

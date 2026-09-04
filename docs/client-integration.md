@@ -605,6 +605,58 @@ Gate the feature on `acceptedEntities` containing `track_flags`. Ship the server
 if you can; if you cannot, the gate is what keeps a flag set against an older server
 from being quarantined as garbage.
 
+## Sound bounds: where each track's sound starts and stops
+
+Added in 1.10.0.0. For the devices that do not hold the file — the desktop always, the
+phone for anything streamed.
+
+```
+GET  /aoide/sound-bounds?ids=<jellyfinId>,…        (≤ 200)
+POST /aoide/sound-bounds  { bounds: { id: { soundStartMs, soundEndMs } | null } }
+```
+
+```json
+{ "bounds": { "3b1c…": { "soundStartMs": 1940, "soundEndMs": 5200 },
+              "a71f…": null },
+  "pending": ["9c0e…"] }
+```
+
+- **`null`** means measured, nothing to trim: play the file whole.
+- **`pending`** means queued: play it whole this time and ask again next time. Nothing is
+  measured until someone asks, and one file decodes at a time by default, so the first
+  request for a long playlist is mostly pending and the next is mostly answered.
+- **Missing from both** means unknown, not visible to you, or no file to measure — the
+  same thing as far as the player is concerned. A 404 on the whole endpoint (an older
+  server) is also "trim nothing", as the desktop already assumes.
+
+The cache is keyed by the file's modification time, so a replaced file is measured again
+without anyone clearing anything.
+
+### The measurement is the phone's, not an approximation of it
+
+`PlaybackKit/SilenceBounds.swift` is ported line for line and run over PCM decoded by
+the ffmpeg Jellyfin ships: any channel above 0.00178 absolute is sound; first and last
+such frame to milliseconds by schoolbook rounding; −60 ms and +200 ms margins, floored
+and capped; nothing reported when both trims are under 300 ms. The phone's six fixtures
+pass here with the spec's exact numbers, 1940 and 5200.
+
+`silencedetect` was deliberately not used. It finds *runs* of silence with its own
+minimum-duration window and reports its own crossings — a second algorithm approximating
+the first. With the reference scan over decoded samples, only the decoder differs.
+
+**Where the decoder can differ:** for lossless files (FLAC, ALAC, WAV) both sides see the
+same samples and the numbers are identical. For lossy files (MP3, AAC) the two decoders
+can disagree by a few samples, and MP3 encoder-delay handling can shift a frame — well
+inside the 60 ms and 200 ms margins, so a trim never lands on audible sound, but the
+millisecond values may not be byte-equal between a phone measurement and a server one.
+Treat them as the same answer.
+
+### `POST` — a phone sharing what it measured
+
+Optional. A client that measured a file itself may send the result so the server serves
+it without decoding. It is stored as-is, keyed on the file's current modification time,
+and served with `source: client` internally; it is not re-measured.
+
 ## Invariants only the client can enforce
 
 The server cannot check these, and nothing will complain if you get them wrong:

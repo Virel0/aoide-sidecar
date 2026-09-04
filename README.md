@@ -19,8 +19,9 @@ playlists into Jellyfin.
 Collaborative playlists are supported: the owner invites another Jellyfin user, and
 both can view and edit.
 
-Playlist export also runs as a nightly scheduled task, off by default — enable it under
-the plugin's configuration page.
+Two scheduled tasks exist and both are off by default, switchable on the plugin's
+configuration page: the nightly playlist export, and a library-wide sound-bounds sweep
+(hours of decoding on a large library; tracks are measured on request regardless).
 
 | endpoint | since |
 | -------- | ----- |
@@ -33,6 +34,7 @@ the plugin's configuration page.
 | `GET`/`POST`/`DELETE /aoide/shares` | 1.6.0.0 |
 | `GET /aoide/queue` | 1.7.0.0 |
 | `POST /aoide/match` | 1.8.0.0 |
+| `GET`/`POST /aoide/sound-bounds` | 1.10.0.0 |
 
 ## Build
 

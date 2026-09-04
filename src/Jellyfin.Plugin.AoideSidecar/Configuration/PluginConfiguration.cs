@@ -76,6 +76,30 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool EnableScheduledExport { get; set; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether the nightly sound-bounds sweep runs.
+    /// </summary>
+    /// <remarks>
+    /// Off by default. The sweep decodes every track in the library once, which on a
+    /// large library is hours of CPU — a choice for whoever runs the server, not a side
+    /// effect of a plugin update. Measurement still happens lazily on request either way.
+    /// </remarks>
+    public bool EnableSoundBoundsSweep { get; set; }
+
+    /// <summary>
+    /// Gets or sets how many files may decode at once for sound bounds.
+    /// </summary>
+    /// <remarks>
+    /// One by default, so a first sync of a large playlist queues decodes rather than
+    /// launching them all at once and starving playback transcodes of CPU.
+    /// </remarks>
+    public int SoundBoundsConcurrency { get; set; } = 1;
+
+    /// <summary>
+    /// Gets or sets the longest a single sound-bounds decode may run, in seconds.
+    /// </summary>
+    public int SoundBoundsTimeoutSeconds { get; set; } = 180;
+
+    /// <summary>
     /// Gets or sets the number of ops returned by a pull that does not specify a limit.
     /// </summary>
     public int DefaultPullLimit { get; set; } = 500;

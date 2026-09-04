@@ -198,6 +198,31 @@ the easy order, but the gate makes either order safe, for this entity and every 
 
 Your spec's other two answers, confirmed: export nothing; retention keeps it.
 
+## 11. Sound bounds — built, with one deliberate departure from the spec
+
+`GET /aoide/sound-bounds?ids=…` and the optional `POST`, exactly the shapes you proposed,
+lazy and mtime-keyed, ≤ 200 ids, unknown ids omitted. Live in **1.10.0.0**.
+
+**I did not use `silencedetect`.** Your spec says both sides must match exactly, and
+`silencedetect` cannot deliver that: it finds runs of silence with its own minimum
+duration and reports its own crossings — a second algorithm approximating yours. Instead
+`SilenceBounds.swift` is ported line for line (threshold, strict greater-than, per-frame
+any-channel peak, schoolbook ms rounding — .NET defaults to banker's, which would land a
+half-millisecond a millisecond early — margins, 300 ms rule) and run over float PCM from
+the ffmpeg Jellyfin ships, at the file's native rate with no resampling. Your six
+fixtures pass here at the spec's exact numbers, 1940 and 5200, plus a few edges your
+60 ms slack would hide: a sample exactly at threshold is silence, one loud sample bounds
+itself, torn reads are reassembled.
+
+What can still differ is the decoder, and only for lossy files: MP3/AAC decoders disagree
+by samples and MP3 encoder-delay handling by a frame — inside your margins, so never on
+audible sound, but not byte-equal. Lossless is identical. Verified end to end on a real
+Jellyfin: a 2 s / 3 s / 2.5 s WAV in the library came back `pending` on the first ask
+and `{1940, 5200}` on the second; an all-silent file came back `null`.
+
+Sweep task exists, off by default (hours of decoding on a big library). Concurrency is 1
+by default so a long playlist's first sync queues rather than storms.
+
 ## Endpoint summary
 
 | endpoint | since | what it is for |
@@ -212,6 +237,7 @@ Your spec's other two answers, confirmed: export nothing; retention keeps it.
 | `GET`/`POST`/`DELETE /aoide/shares` | 1.6.0.0 | collaborative playlists |
 | `GET /aoide/queue` | 1.7.0.0 | resume across devices |
 | `POST /aoide/match` | 1.8.0.0 | match an imported track list against the library |
+| `GET`/`POST /aoide/sound-bounds` | 1.10.0.0 | where each track's sound starts and stops |
 
 All take the same Jellyfin user token. An admin API key returns 401 — it carries no user
 id, and every op is scoped to a user.

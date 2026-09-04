@@ -53,6 +53,32 @@
                     <input id="MaxPullLimit" name="MaxPullLimit" type="number" is="emby-input" min="1" />
                 </div>
 
+                <div class="checkboxContainer checkboxContainer-withDescription">
+                    <label class="emby-checkbox-label">
+                        <input id="EnableScheduledExport" name="EnableScheduledExport" type="checkbox" is="emby-checkbox" />
+                        <span>Export playlists to Jellyfin nightly</span>
+                    </label>
+                    <div class="fieldDescription checkboxFieldDescription">
+                        Off by default. Rewrites Jellyfin playlists from Aoide unattended; run one export by hand first.
+                    </div>
+                </div>
+
+                <div class="checkboxContainer checkboxContainer-withDescription">
+                    <label class="emby-checkbox-label">
+                        <input id="EnableSoundBoundsSweep" name="EnableSoundBoundsSweep" type="checkbox" is="emby-checkbox" />
+                        <span>Measure sound bounds for the whole library nightly</span>
+                    </label>
+                    <div class="fieldDescription checkboxFieldDescription">
+                        Off by default. Decodes every track once so clients can trim silence; hours of CPU on a large library.
+                        Tracks are measured on request either way.
+                    </div>
+                </div>
+
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="SoundBoundsConcurrency">Sound-bounds decodes at once</label>
+                    <input id="SoundBoundsConcurrency" name="SoundBoundsConcurrency" type="number" is="emby-input" min="1" max="8" />
+                </div>
+
                 <div>
                     <button is="emby-button" type="submit" class="raised button-submit block emby-button">
                         <span>Save</span>
@@ -65,13 +91,17 @@
     <script type="text/javascript">
         (function () {
             var pluginId = '959763ae-fc57-4339-b8dc-a9c1800a2883';
-            var fields = ['MaxOpsPerPush', 'MaxPayloadBytes', 'MaxPayloadDepth', 'DefaultPullLimit', 'MaxPullLimit'];
+            var fields = ['MaxOpsPerPush', 'MaxPayloadBytes', 'MaxPayloadDepth', 'DefaultPullLimit', 'MaxPullLimit', 'SoundBoundsConcurrency'];
+            var flags = ['EnableScheduledExport', 'EnableSoundBoundsSweep'];
 
             document.querySelector('#AoideSidecarConfigPage').addEventListener('pageshow', function () {
                 Dashboard.showLoadingMsg();
                 ApiClient.getPluginConfiguration(pluginId).then(function (config) {
                     fields.forEach(function (field) {
                         document.querySelector('#' + field).value = config[field];
+                    });
+                    flags.forEach(function (flag) {
+                        document.querySelector('#' + flag).checked = !!config[flag];
                     });
                     Dashboard.hideLoadingMsg();
                 });
@@ -83,6 +113,9 @@
                 ApiClient.getPluginConfiguration(pluginId).then(function (config) {
                     fields.forEach(function (field) {
                         config[field] = parseInt(document.querySelector('#' + field).value, 10);
+                    });
+                    flags.forEach(function (flag) {
+                        config[flag] = document.querySelector('#' + flag).checked;
                     });
                     ApiClient.updatePluginConfiguration(pluginId, config).then(function (result) {
                         Dashboard.processPluginConfigurationUpdateResult(result);

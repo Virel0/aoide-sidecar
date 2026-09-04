@@ -38,5 +38,17 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<SharingRepository>();
         serviceCollection.AddSingleton<Export.PlaylistExporter>();
         serviceCollection.AddSingleton<MediaBrowser.Model.Tasks.IScheduledTask, Export.PlaylistExportTask>();
+
+        serviceCollection.AddSingleton<SoundBoundsRepository>();
+        serviceCollection.AddSingleton<Sound.ISoundBoundsMeasurer>(provider => new Sound.FfmpegSoundBoundsMeasurer(
+            provider.GetRequiredService<MediaBrowser.Controller.MediaEncoding.IMediaEncoder>(),
+            provider.GetRequiredService<ILogger<Sound.FfmpegSoundBoundsMeasurer>>(),
+            TimeSpan.FromSeconds(Math.Max(10, Plugin.Instance?.Configuration.SoundBoundsTimeoutSeconds ?? 180))));
+        serviceCollection.AddSingleton(provider => new Sound.SoundBoundsService(
+            provider.GetRequiredService<SoundBoundsRepository>(),
+            provider.GetRequiredService<Sound.ISoundBoundsMeasurer>(),
+            provider.GetRequiredService<ILogger<Sound.SoundBoundsService>>(),
+            Plugin.Instance?.Configuration.SoundBoundsConcurrency ?? 1));
+        serviceCollection.AddSingleton<MediaBrowser.Model.Tasks.IScheduledTask, Sound.SoundBoundsSweepTask>();
     }
 }
