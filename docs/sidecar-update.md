@@ -1,7 +1,7 @@
 # Sidecar update for the app chat
 
 Everything that changed on the server since the last sync-up, and the three things that
-need action on the client. Current release: **1.7.0.0**. Full contract is in
+need action on the client. Current release: **1.10.0.0**. Full contract is in
 [client-integration.md](client-integration.md).
 
 ---
