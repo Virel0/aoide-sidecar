@@ -9,6 +9,14 @@
         "imageUrl": "",
         "versions": [
             {
+                "version": "1.10.0.0",
+                "changelog": "GET/POST /aoide/sound-bounds: where each track's sound starts and stops, measured with the phone's exact algorithm over ffmpeg-decoded PCM, lazily and cached by file mtime.",
+                "targetAbi": "10.11.0.0",
+                "sourceUrl": "https://github.com/Virel0/aoide-sidecar/releases/download/v1.10.0.0/aoide-sidecar_1.10.0.0.zip",
+                "checksum": "8345c36d916345fed25a87c7cdc414da",
+                "timestamp": "2026-09-04T20:43:16Z"
+            },
+            {
                 "version": "1.9.0.0",
                 "changelog": "Accept track_flags; /aoide/sync/status now advertises pluginVersion and acceptedEntities so clients can gate new entities safely.",
                 "targetAbi": "10.11.0.0",
