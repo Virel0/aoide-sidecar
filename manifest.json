@@ -9,6 +9,14 @@
         "imageUrl": "",
         "versions": [
             {
+                "version": "1.9.0.0",
+                "changelog": "Accept track_flags; /aoide/sync/status now advertises pluginVersion and acceptedEntities so clients can gate new entities safely.",
+                "targetAbi": "10.11.0.0",
+                "sourceUrl": "https://github.com/Virel0/aoide-sidecar/releases/download/v1.9.0.0/aoide-sidecar_1.9.0.0.zip",
+                "checksum": "a3a2e96423124176d8935ed83a967736",
+                "timestamp": "2026-09-04T18:32:05Z"
+            },
+            {
                 "version": "1.8.1.0",
                 "changelog": "Align matching rules with the clients: bracket groups are dropped only when they contain a noise word; unified noise-word list; the shared 16-row table is now a hard test gate.",
                 "targetAbi": "10.11.0.0",
