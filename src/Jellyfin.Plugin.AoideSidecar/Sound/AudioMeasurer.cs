@@ -98,6 +98,7 @@ public sealed class FfmpegAudioMeasurer : IAudioMeasurer
         var bounds = new SoundBoundsScan(channels, sampleRate);
         var tempo = new TempoScan(channels, sampleRate);
         var chroma = new ChromaScan(channels, sampleRate);
+        var voice = new VocalScan(channels, sampleRate);
         long frames;
 
         try
@@ -105,7 +106,7 @@ public sealed class FfmpegAudioMeasurer : IAudioMeasurer
             // The scans read the pipe as ffmpeg fills it, so a long file never sits in
             // memory whole.
             frames = await Task.Run(
-                () => PcmPump.Run(ffmpeg.StandardOutput.BaseStream, channels, new IPcmConsumer[] { bounds, tempo, chroma }),
+                () => PcmPump.Run(ffmpeg.StandardOutput.BaseStream, channels, new IPcmConsumer[] { bounds, tempo, chroma, voice }),
                 deadline.Token).ConfigureAwait(false);
             await ffmpeg.WaitForExitAsync(deadline.Token).ConfigureAwait(false);
         }
@@ -128,15 +129,28 @@ public sealed class FfmpegAudioMeasurer : IAudioMeasurer
             : null;
 
         var beat = tempo.Result();
+        var durationMs = frames * 1000.0 / sampleRate;
         var grid = BeatGridAnalyzer.Analyze(
             tempo.Onsets,
             tempo.LowOnsets,
             tempo.Rate,
             tempo.FirstOnsetMs,
-            frames * 1000.0 / sampleRate,
-            beat);
+            durationMs,
+            beat,
+            out var tracked);
 
-        return new AudioMeasurement(bounds.Result(), loudness, beat, grid, chroma.Result());
+        var arrangement = ArrangementAnalyzer.Analyze(
+            tempo.Timbre,
+            tempo.TimbreRate,
+            tempo.Onsets,
+            tempo.Rate,
+            tempo.FirstOnsetMs,
+            tracked,
+            grid,
+            durationMs,
+            voice.Spans());
+
+        return new AudioMeasurement(bounds.Result(), loudness, beat, grid, chroma.Result(), arrangement);
     }
 
     private async Task<(int Channels, int SampleRate)> ProbeAsync(string path, CancellationToken cancellationToken)

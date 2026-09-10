@@ -80,6 +80,13 @@ public static class TempoAnalyzer
     private const double LocalMeanSeconds = 1.5;
 
     /// <summary>
+    /// Window over which the onset signal is levelled, in seconds. Longer than the mean
+    /// window because it must not flatten the beat itself — only the difference between one
+    /// passage and another.
+    /// </summary>
+    private const double LevellingSeconds = 6;
+
+    /// <summary>
     /// Extra lags correlated on either side of the reported range. They are never chosen,
     /// but a peak at the very edge needs a neighbour on both sides to interpolate against,
     /// and the half-lag of a fast tempo can fall just outside.
@@ -123,9 +130,11 @@ public static class TempoAnalyzer
 
         var centred = LocalMeanRemoved(onsets, from, count, (int)Math.Round(LocalMeanSeconds * rate));
 
-        // Asked of the onsets as detected, not of the smoothed copy below: the question is
-        // whether anything in the file actually starts, and smoothing spreads a spike out
-        // and lowers it without making it any less of an onset.
+        // Asked of the onsets as detected, before either levelling or smoothing: the
+        // question is whether anything in the file actually starts, and both of those
+        // change the scale of an onset without changing whether it was one. Levelling in
+        // particular divides by a floor, which would turn the noise in a silent track into
+        // something that looks like signal.
         double raw = 0;
         foreach (var value in centred)
         {
@@ -138,7 +147,7 @@ public static class TempoAnalyzer
             return null;
         }
 
-        var strength = Smoothed(centred);
+        var strength = Smoothed(Levelled(centred, (int)Math.Round(LevellingSeconds * rate)));
 
         double variance = 0;
         foreach (var value in strength)
@@ -366,6 +375,51 @@ public static class TempoAnalyzer
     }
 
     /// <summary>
+    /// Levels the onset signal so every passage of a track gets an equal say in its tempo.
+    /// </summary>
+    /// <remarks>
+    /// Autocorrelation weights by energy, so a loud passage counts for its amplitude
+    /// squared and a quiet one barely counts at all. That lets a short, loud, regular
+    /// stretch decide the answer for a whole track: on a fixture with thirty seconds of
+    /// sung syllables at 800 ms inside three and a half minutes of a 128 BPM groove, the
+    /// tempo came back as 73 — and the same file with the vocal removed came back as 128.
+    /// Dividing by a local level puts a quiet verse and a loud chorus on the same footing.
+    /// The floor keeps a silent stretch from being amplified into meaningful-looking noise.
+    /// </remarks>
+    private static double[] Levelled(double[] strength, int window)
+    {
+        if (window < 2 || strength.Length == 0)
+        {
+            return strength;
+        }
+
+        var squares = new double[strength.Length + 1];
+        for (var i = 0; i < strength.Length; i++)
+        {
+            squares[i + 1] = squares[i] + (strength[i] * strength[i]);
+        }
+
+        var overall = Math.Sqrt(squares[^1] / strength.Length);
+        var floor = overall * 0.25;
+        if (floor <= 1e-12)
+        {
+            return strength;
+        }
+
+        var half = window / 2;
+        var levelled = new double[strength.Length];
+        for (var i = 0; i < strength.Length; i++)
+        {
+            var low = Math.Max(0, i - half);
+            var high = Math.Min(strength.Length, i + half + 1);
+            var local = Math.Sqrt((squares[high] - squares[low]) / (high - low));
+            levelled[i] = strength[i] / Math.Max(local, floor) * overall;
+        }
+
+        return levelled;
+    }
+
+    /// <summary>
     /// Spreads each onset over its neighbours with a narrow Gaussian.
     /// </summary>
     /// <remarks>
@@ -489,6 +543,13 @@ internal sealed class TempoScan : IPcmConsumer
     /// <summary>Bands below this are where a downbeat is found.</summary>
     private const double LowBandTopHz = 250;
 
+    /// <summary>
+    /// How many hops are averaged into one retained timbre frame. Structure moves over
+    /// bars, not milliseconds, so keeping every hop would be a hundred times the memory for
+    /// nothing.
+    /// </summary>
+    private const int TimbreDecimation = 5;
+
     /// <summary>How many bands to aim for, before bins force them apart.</summary>
     private const int TargetBands = 24;
 
@@ -506,6 +567,9 @@ internal sealed class TempoScan : IPcmConsumer
     private readonly double[] _previous;
     private readonly List<float> _onsets = new();
     private readonly List<float> _low = new();
+    private readonly List<float[]> _timbre = new();
+    private double[] _timbreSum = Array.Empty<double>();
+    private int _timbreCount;
 
     private bool _havePrevious;
     private int _writeAt;
@@ -555,6 +619,7 @@ internal sealed class TempoScan : IPcmConsumer
         }
 
         _lowBands = Math.Max(1, _lowBands);
+        _timbreSum = new double[_previous.Length];
         SampleRate = sampleRate;
     }
 
@@ -569,6 +634,16 @@ internal sealed class TempoScan : IPcmConsumer
 
     /// <summary>Gets the onset strength of the low bands alone, for finding downbeats.</summary>
     public IReadOnlyList<float> LowOnsets => _low;
+
+    /// <summary>
+    /// Gets the log energy of every band over time, one frame per
+    /// <see cref="TimbreDecimation"/> hops. What a passage is made of rather than when
+    /// something happened in it, which is what tells one section of a track from another.
+    /// </summary>
+    public IReadOnlyList<float[]> Timbre => _timbre;
+
+    /// <summary>Gets the timbre frames per second.</summary>
+    public double TimbreRate => Rate / TimbreDecimation;
 
     /// <summary>
     /// Gets where the first onset value sits in the track, in milliseconds.
@@ -681,6 +756,20 @@ internal sealed class TempoScan : IPcmConsumer
             }
 
             _previous[band] = energy;
+            _timbreSum[band] += energy;
+        }
+
+        if (++_timbreCount == TimbreDecimation)
+        {
+            var frame = new float[_timbreSum.Length];
+            for (var band = 0; band < frame.Length; band++)
+            {
+                frame[band] = (float)(_timbreSum[band] / TimbreDecimation);
+                _timbreSum[band] = 0;
+            }
+
+            _timbre.Add(frame);
+            _timbreCount = 0;
         }
 
         if (_havePrevious)

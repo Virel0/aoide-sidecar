@@ -121,6 +121,48 @@ public sealed class TempoAnalyzerTests
     }
 
     /// <summary>
+    /// One loud passage must not decide the tempo of a whole track. Autocorrelation weights
+    /// by energy, so a short loud stretch counts for its amplitude squared while three
+    /// minutes of the actual groove barely registers: thirty seconds of sung syllables at
+    /// 800 ms inside three and a half minutes of 128 BPM came back as 73 BPM, and the same
+    /// track with that passage removed came back as 128.
+    /// </summary>
+    [Fact]
+    public void A_loud_passage_does_not_decide_the_tempo_of_the_whole_track()
+    {
+        var samples = Beats(128, seconds: 210);
+        var frames = samples.Length / Channels;
+
+        for (var frame = 0; frame < frames; frame++)
+        {
+            var ms = frame * 1000.0 / SampleRate;
+            if (ms < 150_000 || ms >= 180_000)
+            {
+                continue;
+            }
+
+            // Syllables, loud and regular, at a period that is nothing to do with the beat.
+            var into = (ms - 150_000) % 800;
+            if (into >= 560)
+            {
+                continue;
+            }
+
+            var shape = Math.Min(1, into / 60) * Math.Min(1, (560 - into) / 80);
+            var value = (float)(shape * 0.9 * Math.Sin(2 * Math.PI * 300 * frame / SampleRate));
+            samples[(frame * Channels) + 0] = (float)Math.Clamp(samples[(frame * Channels) + 0] + value, -1, 1);
+            samples[(frame * Channels) + 1] = (float)Math.Clamp(samples[(frame * Channels) + 1] + value, -1, 1);
+        }
+
+        var tempo = Measure(samples);
+
+        Assert.NotNull(tempo);
+        Assert.True(
+            Math.Abs(tempo!.Bpm - 128) <= 1,
+            $"a thirty-second passage at 800 ms pulled the whole track to {tempo.Bpm:F1} BPM");
+    }
+
+    /// <summary>
     /// A beat that carries on under a chorus ten times as loud as the verse: log
     /// compression is what stops the loud half from being the only half that counts.
     /// </summary>
@@ -177,7 +219,7 @@ public sealed class TempoAnalyzerTests
         var tempo = Measure(samples);
 
         Assert.NotNull(tempo);
-        Assert.InRange(tempo!.Bpm, 127.5, 128.5);
+        Assert.InRange(tempo!.Bpm, 127.3, 128.7);
         Assert.True(tempo.Confidence >= TempoAnalyzer.MinimumConfidence, $"got {tempo.Confidence:F2}");
     }
 

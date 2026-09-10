@@ -3,8 +3,8 @@
 A Jellyfin plugin that gives a music app the things Jellyfin's music model is bad at:
 playlists that sync between devices, collaborative playlists, real play history,
 resume-across-devices, playlist artwork, silence trimming for gapless playback, loudness
-and tempo for a library mastered decades apart, beat grids for mixed transitions, and a
-matcher for importing playlists from elsewhere.
+and tempo for a library mastered decades apart, beat grids and song structure for mixed
+transitions, and a matcher for importing playlists from elsewhere.
 
 It is the server half of [Aoide](#the-aoide-apps). Jellyfin stays the source of truth
 for files, tags, artwork and which music exists at all. The sidecar owns everything
@@ -32,6 +32,7 @@ SQLite. Offline is not a degraded mode; it is the normal mode that sometimes als
 | How loud each track is and how fast | `GET`/`POST /aoide/audio-analysis` | 1.11.0.0 |
 | Whether a track keeps its tempo | `bpmStability` on the same endpoint | 1.12.0.0 |
 | Where the beats fall, the meter, and where a mix may run | `GET /aoide/beat-grid` | 1.13.0.0 |
+| What a track is made of: sections, phrases, vocals | `GET /aoide/arrangement` | 1.15.0.0 |
 | How much of the library has been measured | `GET /aoide/analysis/coverage` | 1.14.0.0 |
 
 Two scheduled tasks exist and both are **off by default**, switchable on the plugin's
@@ -154,6 +155,14 @@ trace.
   and the onsets it was fitted to. A track whose own beats sit 60 ms off its own grid is
   not one anything should try to mix, and saying so is more useful than a grid that looks
   authoritative.
+- **Structure is measured, song form is not.** Sections come from self-similarity and are
+  labelled `intro`, `build`, `drop`, `breakdown`, `outro` or `unknown` — all of which are
+  properties of the signal. `verse` and `chorus` are never returned: telling them apart is
+  a judgement about song form rather than something the audio settles.
+- **Vocal spans have three states, not two.** A list, an empty list meaning none was found,
+  and `null` meaning it could not be told — which is not an instrumental. It is the
+  roughest measurement here, biased towards saying yes because the error that matters is
+  missing a vocal, not inventing one.
 - **The key is a guess and is scored as one.** It hears which notes a track leans on, so
   it knows nothing about modulation and is weakest between a key and its relative major or
   minor. Meant for preferring one pair of tracks over another, never for refusing a pair.

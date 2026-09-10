@@ -19,7 +19,8 @@ GET  /aoide/sync/pull?since=<cursor>&limit=<n>
 
 Everything else hangs off `/aoide` on the same server: `/aoide/images`, `/aoide/export`,
 `/aoide/shares`, `/aoide/queue`, `/aoide/match`, `/aoide/sound-bounds`,
-`/aoide/audio-analysis` and `/aoide/beat-grid`, each described in its own section below.
+`/aoide/audio-analysis`, `/aoide/beat-grid` and `/aoide/arrangement`, each described in its
+own section below.
 
 ```
 Authorization: MediaBrowser Token="<the user's Jellyfin access token>"
@@ -732,6 +733,15 @@ Bands rather than total energy, because most of what carries a beat does not mak
 louder — a hi-hat over a sustained pad, a snare under a bass note. Watching the total,
 those events are invisible; watching each band, they are unmistakable.
 
+**One passage cannot decide the answer for a track.** Autocorrelation weights by energy, so
+a short loud regular stretch counts for its amplitude squared while minutes of the actual
+groove barely register — thirty seconds of sung syllables at 800 ms inside three and a half
+minutes of 128 BPM came back as 73 BPM, and the same file with that passage removed came
+back as 128. Since 1.15.0.0 the onset signal is levelled over a six-second window before it
+is correlated, which puts a quiet verse and a loud chorus on the same footing. If you have
+tempi from 1.14.0.0 or earlier on tracks with a loud bridge or a long sung passage, they
+are worth re-measuring.
+
 **Accuracy.** Across synthesised beats from 62 to 198 BPM the estimate lands within
 **0.2 BPM**, with no octave errors anywhere in the range. Half and double are still the
 failure mode to expect on real music — an envelope that repeats every beat repeats every
@@ -781,6 +791,134 @@ the file itself, so there is no op log, no export, no retention rule and nothing
 resolve between devices. Do not push them as ops — `audio_analysis` is not an accepted
 entity and never will be.
 
+## Arrangement
+
+Added in 1.15.0.0. What a track is made of and in what order, so a transition can happen
+somewhere the music has room for it.
+
+```
+GET /aoide/arrangement?ids=<jellyfinId>,…      (≤ 200)
+```
+
+```json
+{ "arrangements": {
+    "3b1c…": {
+      "sections": [
+        { "startMs": 0,      "endMs": 29993,  "kind": "intro",     "energy": 0.0 },
+        { "startMs": 29993,  "endMs": 119993, "kind": "drop",      "energy": 0.91 },
+        { "startMs": 119993, "endMs": 149993, "kind": "breakdown", "energy": 0.46 },
+        { "startMs": 149993, "endMs": 179993, "kind": "drop",      "energy": 1.0 },
+        { "startMs": 179993, "endMs": 210000, "kind": "outro",     "energy": 0.31 }
+      ],
+      "phraseBars": 16,
+      "phraseAnchorMs": 23.4,
+      "vocals": [ { "startMs": 39636, "endMs": 80062 } ] },
+    "a71f…": null },
+  "pending": ["9c0e…"] }
+```
+
+Same decode as everything else. Sections are contiguous and cover the track end to end.
+
+### Sections
+
+Boundaries come from self-similarity: each beat is described by what the spectrum was made
+of over it, every beat is compared with every other, and a checkerboard kernel is dragged
+down the diagonal — it reads high where the beats before a point resemble each other, the
+beats after resemble each other, and the two halves do not resemble one another. That is a
+section boundary expressed as arithmetic, and it needs no model.
+
+Per beat, on the grid that was already fitted, so every boundary is on a beat for free.
+Each is then moved onto a **phrase line if one is within two bars**, and onto the nearest
+**bar line** otherwise. Dragging a real change half a phrase to fit the grid would be
+inventing structure rather than finding it.
+
+**`energy` is normalised within the track**, so a quiet record's loudest part still reads
+as 1.0. It is level and onset density together, which is why a busy quiet passage can
+out-rank a sparse loud one.
+
+### The kinds, and the two that are never returned
+
+| kind | what it means |
+| ---- | ------------- |
+| `intro` | The opening, and quiet relative to the track |
+| `build` | Climbs across itself into something louder |
+| `drop` | The loudest sections, with the weight in the bottom third to match |
+| `breakdown` | Clearly quieter than the section either side |
+| `outro` | The ending, and quiet |
+| `unknown` | Measured, and nothing about it is distinctive enough to name |
+
+**`verse` and `chorus` are in the agreed set and are never returned.** Telling one from the
+other is a judgement about song form, not a property of the signal — they are frequently
+identical in level, spectrum and density, and separating them needs a model trained on what
+people call things. Everything in the table above is measurable. Expect `unknown` often; it
+is a real answer.
+
+A build has to climb across its own span, not merely be quieter than what follows. Without
+that rule every breakdown before a drop came back as a build — and a breakdown is precisely
+where a client would most want to bring a record in.
+
+### The phrase grid
+
+`phraseBars` is 8, 16 or 32, and `phraseAnchorMs` is a downbeat that begins a phrase; both
+are null where the structure would not commit, which is the honest answer for a live
+recording or anything through-composed.
+
+Found by scoring each candidate length and offset on how much of the track's novelty lands
+on the bar lines it predicts. **Shorter lengths are preferred** unless a longer one is
+clearly better: a track built in eights also changes on every sixteenth and thirty-second
+bar line, so without that bias the longest candidate wins by having fewer lines to average
+over — and it drags every section boundary out of place with it.
+
+### Vocals — read this part carefully
+
+`vocals` has **three** states and they are not interchangeable:
+
+| value | meaning |
+| ----- | ------- |
+| `[ {startMs, endMs}, … ]` | Singing was found in these stretches |
+| `[]` | Looked, and found none |
+| `null` | **Could not be told.** Not an instrumental |
+
+A `null` must be treated as "this record may be singing throughout". It happens on mono
+files, and on stereo files mixed too narrowly to read, and on tracks whose whole length
+scores the same — either sung throughout or not at all, and this cannot say which.
+
+**This is the roughest measurement in the plugin and it is the one to trust least.** With
+no stems there is no way to isolate a voice, so it leans on two things true of most
+produced records and not of all of them: a lead vocal is mixed to the centre, so it
+survives in the mid channel and largely cancels in the side; and a voice does not hold a
+pitch the way an instrument does, so the spectrum in the vocal band keeps moving when a
+pad's does not. A centred lead synth will read as singing. A hard-panned vocal will not.
+
+**It is biased towards saying yes**, deliberately. A false positive costs a mix that would
+have been fine; a false negative puts two lead vocals on top of each other, which is the
+mistake the measurement exists to prevent. Errors belong on the cautious side.
+
+**Untested on real music**, like the key. It finds a centred vibrato lead over a wide pad
+to within half a second on a synthesised fixture. That proves the mechanism, not the
+result.
+
+### Where this is weakest
+
+**Section boundaries inherit the grid's segments.** They are snapped to bar lines of the
+published grid, which means they are only as good as the segment they land in. Check the
+`residualMs` of the segment covering a boundary before treating it as a true bar line: on a
+segment reading 50 ms, a boundary can sit a beat or so from where the music actually
+changed.
+
+**A build that ramps continuously into a drop tends to merge with it.** Self-similarity
+finds a boundary where the music stops resembling itself, and a build that slides into the
+drop never does. Expect the two to come back as one section, usually named `drop`.
+
+**Energy is relative, so an unusual section can pull the scale.** On a track whose second
+drop carries a vocal the first drop can read at 0.5 rather than 1.0, and drop below the
+threshold for being named `drop` at all. The ordering is trustworthy; the absolute figures
+are only meaningful against the same track.
+
+### What is deliberately not here
+
+No stems, no separation, no model of taste, and no opinion about what to play next.
+
 ## How much has been measured
 
 Added in 1.14.0.0. Measurement is lazy — a track is decoded the first time something asks
@@ -792,7 +930,7 @@ GET /aoide/analysis/coverage
 
 ```json
 { "tracks": 4210, "soundBounds": 4198, "audioAnalysis": 4198, "beatGrids": 4198,
-  "gridded": 3806, "measuring": 1, "sweepEnabled": false,
+  "gridded": 3806, "arrangements": 4198, "described": 3790, "measuring": 1, "sweepEnabled": false,
   "summary": "4198 of 4210 tracks measured (100%), 3806 with a beat grid. Nothing outstanding." }
 ```
 

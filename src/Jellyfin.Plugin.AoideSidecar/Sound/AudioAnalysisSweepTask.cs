@@ -49,9 +49,9 @@ public class AudioAnalysisSweepTask : IScheduledTask, IConfigurableScheduledTask
 
     /// <inheritdoc />
     public string Description =>
-        "Measures where each track's sound starts and stops, how loud it is, how fast, and where its beats fall, "
-        + "so clients can trim silence, level playback across a library mastered decades apart, and mix one track "
-        + "into the next. Decodes every track once; a large library takes hours the first time.";
+        "Measures where each track's sound starts and stops, how loud it is, how fast, where its beats fall and "
+        + "what it is made of, so clients can trim silence, level playback across a library mastered decades apart, "
+        + "and mix one track into the next. Decodes every track once; a large library takes hours the first time.";
 
     /// <inheritdoc />
     public string Category => "Aoide Sidecar";

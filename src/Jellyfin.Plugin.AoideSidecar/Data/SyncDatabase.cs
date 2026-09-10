@@ -23,7 +23,7 @@ namespace Jellyfin.Plugin.AoideSidecar.Data;
 /// </remarks>
 public sealed class SyncDatabase
 {
-    private const int CurrentSchemaVersion = 8;
+    private const int CurrentSchemaVersion = 9;
 
     private static readonly string[] Migrations =
     {
@@ -219,6 +219,36 @@ public sealed class SyncDatabase
             source         TEXT NOT NULL,
             error          TEXT,
             measured_at    INTEGER NOT NULL
+        );
+        """,
+
+        // v9 — what the track is made of and in what order, from the same decode again.
+        //
+        // The server's own tempo and grid rows go with it. Until this release a short loud
+        // passage could decide a whole track's tempo — thirty seconds of sung syllables
+        // against three and a half minutes of groove came back as 73 BPM where the same
+        // file without them came back as 128 — and nothing would ever re-measure those
+        // rows, because a row is only refreshed when its file changes. Rows a client posted
+        // are left alone.
+        //
+        // vocals is nullable and the null means something: nothing could be told, as
+        // opposed to an empty list, which means nothing was found. A mono file cannot be
+        // read for a centred voice at all, and a caller that treated the two the same would
+        // mix a vocal over a vocal on exactly the files it could say least about.
+        """
+        DELETE FROM audio_analysis WHERE source = 'server';
+        DELETE FROM beat_grids WHERE source = 'server';
+
+        CREATE TABLE IF NOT EXISTS arrangements (
+            jellyfin_id      TEXT PRIMARY KEY,
+            mtime_ticks      INTEGER NOT NULL,
+            sections         TEXT,
+            phrase_bars      INTEGER,
+            phrase_anchor_ms REAL,
+            vocals           TEXT,
+            source           TEXT NOT NULL,
+            error            TEXT,
+            measured_at      INTEGER NOT NULL
         );
         """
     };

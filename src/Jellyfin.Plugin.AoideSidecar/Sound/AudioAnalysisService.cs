@@ -27,6 +27,13 @@ public sealed record AudioAnalysisLookup(AudioAnalysisRow? Row, bool Pending);
 public sealed record BeatGridLookup(BeatGridRow? Row, bool Pending);
 
 /// <summary>
+/// What the service knows about one requested file's arrangement right now.
+/// </summary>
+/// <param name="Row">The cached row, when current.</param>
+/// <param name="Pending">True when a measurement has been queued and the row is not yet usable.</param>
+public sealed record ArrangementLookup(ArrangementRow? Row, bool Pending);
+
+/// <summary>
 /// Serves measurements from the caches and queues the files it does not have.
 /// </summary>
 /// <remarks>
@@ -56,6 +63,7 @@ public sealed class AudioAnalysisService : IDisposable
     private readonly SoundBoundsRepository _bounds;
     private readonly AudioAnalysisRepository _analysis;
     private readonly BeatGridRepository _grids;
+    private readonly ArrangementRepository _arrangements;
     private readonly IAudioMeasurer _measurer;
     private readonly ILogger<AudioAnalysisService> _logger;
     private readonly int _concurrency;
@@ -71,6 +79,7 @@ public sealed class AudioAnalysisService : IDisposable
     /// <param name="bounds">The sound-bounds cache.</param>
     /// <param name="analysis">The loudness and tempo cache.</param>
     /// <param name="grids">The beat-grid cache.</param>
+    /// <param name="arrangements">The arrangement cache.</param>
     /// <param name="measurer">What actually decodes a file.</param>
     /// <param name="logger">Logger.</param>
     /// <param name="concurrency">How many files may decode at once.</param>
@@ -78,6 +87,7 @@ public sealed class AudioAnalysisService : IDisposable
         SoundBoundsRepository bounds,
         AudioAnalysisRepository analysis,
         BeatGridRepository grids,
+        ArrangementRepository arrangements,
         IAudioMeasurer measurer,
         ILogger<AudioAnalysisService> logger,
         int concurrency = 1)
@@ -85,6 +95,7 @@ public sealed class AudioAnalysisService : IDisposable
         _bounds = bounds;
         _analysis = analysis;
         _grids = grids;
+        _arrangements = arrangements;
         _measurer = measurer;
         _logger = logger;
         _concurrency = Math.Max(1, concurrency);
@@ -159,6 +170,28 @@ public sealed class AudioAnalysisService : IDisposable
             id => cached.TryGetValue(id, out var row) ? row : null,
             row => row.MtimeTicks,
             (row, pending) => new BeatGridLookup(row, pending));
+    }
+
+    /// <summary>
+    /// Looks up arrangements for several files, queuing any that need measuring.
+    /// </summary>
+    /// <param name="files">Id and current path of each file.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A lookup per id.</returns>
+    public async Task<Dictionary<string, ArrangementLookup>> LookupArrangementAsync(
+        IReadOnlyList<(string Id, string Path)> files,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(files);
+
+        var cached = await _arrangements.GetManyAsync(files.Select(f => f.Id).ToList(), cancellationToken)
+            .ConfigureAwait(false);
+
+        return Resolve(
+            files,
+            id => cached.TryGetValue(id, out var row) ? row : null,
+            row => row.MtimeTicks,
+            (row, pending) => new ArrangementLookup(row, pending));
     }
 
     /// <summary>
@@ -395,6 +428,16 @@ public sealed class AudioAnalysisService : IDisposable
                     job.MtimeTicks,
                     measurement?.Grid,
                     measurement?.Key,
+                    ServerSource,
+                    error,
+                    Now()),
+                CancellationToken.None).ConfigureAwait(false);
+
+            await _arrangements.UpsertAsync(
+                new ArrangementRow(
+                    job.Id,
+                    job.MtimeTicks,
+                    measurement?.Arrangement,
                     ServerSource,
                     error,
                     Now()),

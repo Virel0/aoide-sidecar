@@ -42,6 +42,14 @@ public class CoverageDto
     [JsonPropertyName("gridded")]
     public long Gridded { get; set; }
 
+    /// <summary>Gets or sets how many have been through structure detection.</summary>
+    [JsonPropertyName("arrangements")]
+    public long Arrangements { get; set; }
+
+    /// <summary>Gets or sets how many of those came out with sections.</summary>
+    [JsonPropertyName("described")]
+    public long Described { get; set; }
+
     /// <summary>Gets or sets how many files are queued or decoding right now.</summary>
     [JsonPropertyName("measuring")]
     public int Measuring { get; set; }
@@ -74,6 +82,7 @@ public class CoverageController : ControllerBase
     private readonly SoundBoundsRepository _bounds;
     private readonly AudioAnalysisRepository _analysis;
     private readonly BeatGridRepository _grids;
+    private readonly ArrangementRepository _arrangements;
     private readonly ILibraryManager _libraryManager;
     private readonly IAuthorizationContext _authorizationContext;
 
@@ -84,6 +93,7 @@ public class CoverageController : ControllerBase
     /// <param name="bounds">The sound-bounds cache.</param>
     /// <param name="analysis">The loudness and tempo cache.</param>
     /// <param name="grids">The beat-grid cache.</param>
+    /// <param name="arrangements">The arrangement cache.</param>
     /// <param name="libraryManager">Jellyfin's library, for the total.</param>
     /// <param name="authorizationContext">Jellyfin's request authorization context.</param>
     public CoverageController(
@@ -91,6 +101,7 @@ public class CoverageController : ControllerBase
         SoundBoundsRepository bounds,
         AudioAnalysisRepository analysis,
         BeatGridRepository grids,
+        ArrangementRepository arrangements,
         ILibraryManager libraryManager,
         IAuthorizationContext authorizationContext)
     {
@@ -98,6 +109,7 @@ public class CoverageController : ControllerBase
         _bounds = bounds;
         _analysis = analysis;
         _grids = grids;
+        _arrangements = arrangements;
         _libraryManager = libraryManager;
         _authorizationContext = authorizationContext;
     }
@@ -127,6 +139,7 @@ public class CoverageController : ControllerBase
         });
 
         var (measuredGrids, gridded) = await _grids.CountAsync(cancellationToken).ConfigureAwait(false);
+        var (measuredArrangements, described) = await _arrangements.CountAsync(cancellationToken).ConfigureAwait(false);
 
         var coverage = new CoverageDto
         {
@@ -135,6 +148,8 @@ public class CoverageController : ControllerBase
             AudioAnalysis = await _analysis.CountAsync(cancellationToken).ConfigureAwait(false),
             BeatGrids = measuredGrids,
             Gridded = gridded,
+            Arrangements = measuredArrangements,
+            Described = described,
             Measuring = _service.InFlight,
             SweepEnabled = Plugin.Instance?.Configuration.EnableSoundBoundsSweep ?? false
         };

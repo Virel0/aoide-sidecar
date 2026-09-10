@@ -15,6 +15,7 @@ public sealed class AudioAnalysisServiceTests : IDisposable
     private readonly SoundBoundsRepository _bounds;
     private readonly AudioAnalysisRepository _analysis;
     private readonly BeatGridRepository _grids;
+    private readonly ArrangementRepository _arrangements;
     private readonly FakeMeasurer _measurer = new();
     private readonly AudioAnalysisService _service;
     private readonly string _file;
@@ -27,8 +28,9 @@ public sealed class AudioAnalysisServiceTests : IDisposable
         _bounds = new SoundBoundsRepository(database);
         _analysis = new AudioAnalysisRepository(database);
         _grids = new BeatGridRepository(database);
+        _arrangements = new ArrangementRepository(database);
         _service = new AudioAnalysisService(
-            _bounds, _analysis, _grids, _measurer, NullLogger<AudioAnalysisService>.Instance);
+            _bounds, _analysis, _grids, _arrangements, _measurer, NullLogger<AudioAnalysisService>.Instance);
         _file = Path.Combine(_directory, "track.flac");
         File.WriteAllText(_file, "not really audio");
     }
@@ -291,6 +293,40 @@ public sealed class AudioAnalysisServiceTests : IDisposable
         Assert.Equal(96210.5, row.Grid.Segments[1].AnchorMs);
         Assert.Null(row.Grid.MixInMs);
         Assert.Null(row.Key);
+    }
+
+    /// <summary>
+    /// "Could not tell" and "found none" are different answers and the difference has to
+    /// survive the database. A client reading an empty list as "no singing" on a file the
+    /// server could say nothing about is the mistake this prevents.
+    /// </summary>
+    [Fact]
+    public async Task Unknown_vocals_and_no_vocals_are_stored_apart()
+    {
+        var second = Path.Combine(_directory, "mono.flac");
+        File.WriteAllText(second, "not really audio either");
+
+        _measurer.Result = new AudioMeasurement(
+            null, null, null, null, null,
+            new Arrangement(
+                new[] { new Section(0, 60000, SectionKind.Unknown, 0.5) }, 8, 0, Array.Empty<VocalSpan>()));
+        await _service.LookupArrangementAsync(new[] { ("t1", _file) }, default);
+        await _service.DrainAsync(default);
+
+        _measurer.Result = new AudioMeasurement(
+            null, null, null, null, null,
+            new Arrangement(
+                new[] { new Section(0, 60000, SectionKind.Unknown, 0.5) }, 8, 0, null));
+        await _service.LookupArrangementAsync(new[] { ("t2", second) }, default);
+        await _service.DrainAsync(default);
+
+        var looked = (await _service.LookupArrangementAsync(new[] { ("t1", _file) }, default))["t1"];
+        var could_not = (await _service.LookupArrangementAsync(new[] { ("t2", second) }, default))["t2"];
+
+        Assert.NotNull(looked.Row!.Arrangement!.Vocals);
+        Assert.Empty(looked.Row.Arrangement.Vocals!);
+        Assert.Null(could_not.Row!.Arrangement!.Vocals);
+        Assert.Equal(8, could_not.Row.Arrangement.PhraseBars);
     }
 
     /// <summary>

@@ -62,8 +62,29 @@ internal static class BeatGridAnalyzer
         double rate,
         double firstOnsetMs,
         double durationMs,
-        Tempo? tempo)
+        Tempo? tempo) => Analyze(onsets, lowOnsets, rate, firstOnsetMs, durationMs, tempo, out _);
+
+    /// <summary>
+    /// Builds the grid, and hands back the beats it was built from.
+    /// </summary>
+    /// <param name="onsets">Onset strength per hop, as the tempo estimate sees it.</param>
+    /// <param name="lowOnsets">Onset strength from the low bands only, where a downbeat lives.</param>
+    /// <param name="rate">Onset values per second.</param>
+    /// <param name="firstOnsetMs">Position of the first onset value in the track.</param>
+    /// <param name="durationMs">The track's length.</param>
+    /// <param name="tempo">The tempo estimate, for the period the tracker expects.</param>
+    /// <param name="beats">The tracked beats, for anything that wants to measure per beat.</param>
+    /// <returns>The grid, or null when there is no grid worth having.</returns>
+    public static BeatGrid? Analyze(
+        IReadOnlyList<float> onsets,
+        IReadOnlyList<float> lowOnsets,
+        double rate,
+        double firstOnsetMs,
+        double durationMs,
+        Tempo? tempo,
+        out TrackedBeats? beats)
     {
+        beats = null;
         ArgumentNullException.ThrowIfNull(onsets);
         ArgumentNullException.ThrowIfNull(lowOnsets);
 
@@ -100,20 +121,21 @@ internal static class BeatGridAnalyzer
         // The tracker has to produce an unbroken chain from the first hop to the last, so
         // a track that opens on twenty seconds of pad gets twenty seconds of beats that are
         // not there. Fitting those produces a whole extra segment describing nothing.
-        var (first, last) = Sounding(tracked, onsets);
+        var carries = Sounding(tracked, onsets, out var first, out var last);
         if (last - first + 1 < MinimumSegmentBeats)
         {
             return null;
         }
 
         var fits = new List<Fit>();
-        Split(times, numbers, first, last, 0, fits);
+        Split(times, numbers, carries, first, last, 0, fits);
         if (fits.Count == 0)
         {
             return null;
         }
 
         var meter = Meter(tracked, numbers, lowOnsets);
+        beats = new TrackedBeats(times, numbers, first, last, meter?.BeatsPerBar, meter?.Phase ?? 0);
         var segments = Describe(fits, times, numbers, durationMs, meter);
         if (segments.Count == 0)
         {
@@ -138,28 +160,46 @@ internal static class BeatGridAnalyzer
     }
 
     /// <summary>
-    /// Trims beats off either end where nothing is actually starting.
+    /// Marks which beats carry anything, and where the sounding part of the track begins
+    /// and ends.
     /// </summary>
-    private static (int First, int Last) Sounding(IReadOnlyList<int> tracked, IReadOnlyList<float> onsets)
+    /// <remarks>
+    /// The tracker must return an unbroken chain from the first hop to the last, so a
+    /// stretch with no percussion in it — a breakdown, an intro of pure pad — still gets
+    /// beats, and they are wherever the chain drifted to. Fitting those alongside real ones
+    /// invents a tempo change: on a track that is 128 BPM throughout, a beat-free breakdown
+    /// produced two extra segments at 130 and 133 BPM with residuals near 60 ms, and every
+    /// section boundary snapped to those bar lines instead of the real ones. Beats that
+    /// carry nothing are excluded from the arithmetic; the fit spans the gap on the beats
+    /// either side, which is exactly right when the tempo did not change.
+    /// </remarks>
+    private static bool[] Sounding(IReadOnlyList<int> tracked, IReadOnlyList<float> onsets, out int first, out int last)
     {
         var strength = Strength(tracked, onsets);
         var sorted = (double[])strength.Clone();
         Array.Sort(sorted);
         var floor = sorted[sorted.Length / 2] * SilentShare;
 
-        var first = 0;
-        while (first < strength.Length - 4 && Mean(strength, first, 4) < floor)
+        var carries = new bool[strength.Length];
+        for (var i = 0; i < strength.Length; i++)
+        {
+            // Judged over a bar rather than a beat: a real beat can land between two hits.
+            carries[i] = Mean(strength, Math.Max(0, i - 2), Math.Min(4, strength.Length - Math.Max(0, i - 2))) >= floor;
+        }
+
+        first = 0;
+        while (first < strength.Length - 1 && !carries[first])
         {
             first++;
         }
 
-        var last = strength.Length - 1;
-        while (last > first + 4 && Mean(strength, last - 3, 4) < floor)
+        last = strength.Length - 1;
+        while (last > first && !carries[last])
         {
             last--;
         }
 
-        return (first, last);
+        return carries;
     }
 
     private static double[] Strength(IReadOnlyList<int> tracked, IReadOnlyList<float> onsets)
@@ -183,13 +223,13 @@ internal static class BeatGridAnalyzer
     /// each part an honest one — and the client is told to mix inside a segment, which is
     /// the truthful way to handle a track that speeds up.
     /// </remarks>
-    private static void Split(double[] times, int[] numbers, int from, int to, int depth, List<Fit> fits)
+    private static void Split(double[] times, int[] numbers, bool[] carries, int from, int to, int depth, List<Fit> fits)
     {
-        var whole = LeastSquares(times, numbers, from, to);
+        var whole = LeastSquares(times, numbers, carries, from, to);
 
         if (depth >= MaxSplitDepth
             || whole.ResidualMs <= GoodResidualMs
-            || to - from + 1 < MinimumSegmentBeats * 2)
+            || whole.Beats < MinimumSegmentBeats * 2)
         {
             fits.Add(whole);
             return;
@@ -199,8 +239,12 @@ internal static class BeatGridAnalyzer
         var bestResidual = double.MaxValue;
         for (var at = from + MinimumSegmentBeats; at <= to - MinimumSegmentBeats; at++)
         {
-            var left = LeastSquares(times, numbers, from, at);
-            var right = LeastSquares(times, numbers, at + 1, to);
+            var left = LeastSquares(times, numbers, carries, from, at);
+            var right = LeastSquares(times, numbers, carries, at + 1, to);
+            if (left.Beats < MinimumSegmentBeats || right.Beats < MinimumSegmentBeats)
+            {
+                continue;
+            }
 
             // Weighted by length, so a split is judged on the whole run and not on
             // whichever side happens to be tidier.
@@ -221,8 +265,8 @@ internal static class BeatGridAnalyzer
             return;
         }
 
-        Split(times, numbers, from, bestAt, depth + 1, fits);
-        Split(times, numbers, bestAt + 1, to, depth + 1, fits);
+        Split(times, numbers, carries, from, bestAt, depth + 1, fits);
+        Split(times, numbers, carries, bestAt + 1, to, depth + 1, fits);
     }
 
     /// <summary>
@@ -234,15 +278,26 @@ internal static class BeatGridAnalyzer
     /// textbook sum-of-squares form would compute it as the difference of two very large
     /// and nearly equal numbers, and return noise.
     /// </remarks>
-    private static Fit LeastSquares(double[] times, int[] numbers, int from, int to)
+    private static Fit LeastSquares(double[] times, int[] numbers, bool[] carries, int from, int to)
     {
-        var count = to - from + 1;
+        var count = 0;
         double meanNumber = 0;
         double meanTime = 0;
         for (var i = from; i <= to; i++)
         {
+            if (!carries[i])
+            {
+                continue;
+            }
+
             meanNumber += numbers[i];
             meanTime += times[i];
+            count++;
+        }
+
+        if (count < 2)
+        {
+            return new Fit(from, to, times[from], 60000 / 120.0, double.MaxValue, 0);
         }
 
         meanNumber /= count;
@@ -252,6 +307,11 @@ internal static class BeatGridAnalyzer
         double spread = 0;
         for (var i = from; i <= to; i++)
         {
+            if (!carries[i])
+            {
+                continue;
+            }
+
             var dn = numbers[i] - meanNumber;
             covariance += dn * (times[i] - meanTime);
             spread += dn * dn;
@@ -268,6 +328,11 @@ internal static class BeatGridAnalyzer
         double squared = 0;
         for (var i = from; i <= to; i++)
         {
+            if (!carries[i])
+            {
+                continue;
+            }
+
             var error = times[i] - intercept - (msPerBeat * numbers[i]);
             squared += error * error;
         }
@@ -518,3 +583,21 @@ internal static class BeatGridAnalyzer
 
     private sealed record MeterResult(int BeatsPerBar, int Phase);
 }
+
+/// <summary>
+/// The beats a grid was fitted to, for anything else that wants to measure per beat rather
+/// than per hop.
+/// </summary>
+/// <param name="TimesMs">Every tracked beat's position.</param>
+/// <param name="Numbers">Each beat's number, which skips where the tracker missed one.</param>
+/// <param name="First">Index of the first beat that carried anything.</param>
+/// <param name="Last">Index of the last.</param>
+/// <param name="BeatsPerBar">The meter, or null when it could not be established.</param>
+/// <param name="Phase">Which beat number begins a bar.</param>
+public sealed record TrackedBeats(
+    double[] TimesMs,
+    int[] Numbers,
+    int First,
+    int Last,
+    int? BeatsPerBar,
+    int Phase);
