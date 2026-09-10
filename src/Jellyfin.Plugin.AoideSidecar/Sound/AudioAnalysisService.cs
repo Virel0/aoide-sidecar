@@ -20,6 +20,13 @@ public sealed record SoundBoundsLookup(SoundBoundsRow? Row, bool Pending);
 public sealed record AudioAnalysisLookup(AudioAnalysisRow? Row, bool Pending);
 
 /// <summary>
+/// What the service knows about one requested file's beat grid right now.
+/// </summary>
+/// <param name="Row">The cached row, when current.</param>
+/// <param name="Pending">True when a measurement has been queued and the row is not yet usable.</param>
+public sealed record BeatGridLookup(BeatGridRow? Row, bool Pending);
+
+/// <summary>
 /// Serves measurements from the caches and queues the files it does not have.
 /// </summary>
 /// <remarks>
@@ -48,6 +55,7 @@ public sealed class AudioAnalysisService : IDisposable
 
     private readonly SoundBoundsRepository _bounds;
     private readonly AudioAnalysisRepository _analysis;
+    private readonly BeatGridRepository _grids;
     private readonly IAudioMeasurer _measurer;
     private readonly ILogger<AudioAnalysisService> _logger;
     private readonly int _concurrency;
@@ -62,18 +70,21 @@ public sealed class AudioAnalysisService : IDisposable
     /// </summary>
     /// <param name="bounds">The sound-bounds cache.</param>
     /// <param name="analysis">The loudness and tempo cache.</param>
+    /// <param name="grids">The beat-grid cache.</param>
     /// <param name="measurer">What actually decodes a file.</param>
     /// <param name="logger">Logger.</param>
     /// <param name="concurrency">How many files may decode at once.</param>
     public AudioAnalysisService(
         SoundBoundsRepository bounds,
         AudioAnalysisRepository analysis,
+        BeatGridRepository grids,
         IAudioMeasurer measurer,
         ILogger<AudioAnalysisService> logger,
         int concurrency = 1)
     {
         _bounds = bounds;
         _analysis = analysis;
+        _grids = grids;
         _measurer = measurer;
         _logger = logger;
         _concurrency = Math.Max(1, concurrency);
@@ -126,6 +137,28 @@ public sealed class AudioAnalysisService : IDisposable
             id => cached.TryGetValue(id, out var row) ? row : null,
             row => row.MtimeTicks,
             (row, pending) => new AudioAnalysisLookup(row, pending));
+    }
+
+    /// <summary>
+    /// Looks up beat grids for several files, queuing any that need measuring.
+    /// </summary>
+    /// <param name="files">Id and current path of each file.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A lookup per id.</returns>
+    public async Task<Dictionary<string, BeatGridLookup>> LookupGridAsync(
+        IReadOnlyList<(string Id, string Path)> files,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(files);
+
+        var cached = await _grids.GetManyAsync(files.Select(f => f.Id).ToList(), cancellationToken)
+            .ConfigureAwait(false);
+
+        return Resolve(
+            files,
+            id => cached.TryGetValue(id, out var row) ? row : null,
+            row => row.MtimeTicks,
+            (row, pending) => new BeatGridLookup(row, pending));
     }
 
     /// <summary>
@@ -351,6 +384,17 @@ public sealed class AudioAnalysisService : IDisposable
                     job.MtimeTicks,
                     measurement?.Loudness,
                     measurement?.Tempo,
+                    ServerSource,
+                    error,
+                    Now()),
+                CancellationToken.None).ConfigureAwait(false);
+
+            await _grids.UpsertAsync(
+                new BeatGridRow(
+                    job.Id,
+                    job.MtimeTicks,
+                    measurement?.Grid,
+                    measurement?.Key,
                     ServerSource,
                     error,
                     Now()),

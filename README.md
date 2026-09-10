@@ -3,8 +3,8 @@
 A Jellyfin plugin that gives a music app the things Jellyfin's music model is bad at:
 playlists that sync between devices, collaborative playlists, real play history,
 resume-across-devices, playlist artwork, silence trimming for gapless playback, loudness
-and tempo for a library mastered decades apart, and a matcher for importing playlists
-from elsewhere.
+and tempo for a library mastered decades apart, beat grids for mixed transitions, and a
+matcher for importing playlists from elsewhere.
 
 It is the server half of [Aoide](#the-aoide-apps). Jellyfin stays the source of truth
 for files, tags, artwork and which music exists at all. The sidecar owns everything
@@ -31,6 +31,7 @@ SQLite. Offline is not a degraded mode; it is the normal mode that sometimes als
 | Where each track's sound starts and stops | `GET`/`POST /aoide/sound-bounds` | 1.10.0.0 |
 | How loud each track is and how fast | `GET`/`POST /aoide/audio-analysis` | 1.11.0.0 |
 | Whether a track keeps its tempo | `bpmStability` on the same endpoint | 1.12.0.0 |
+| Where the beats fall, the meter, and where a mix may run | `GET /aoide/beat-grid` | 1.13.0.0 |
 
 Two scheduled tasks exist and both are **off by default**, switchable on the plugin's
 configuration page: a nightly playlist export, and a library-wide analysis sweep (hours
@@ -147,9 +148,14 @@ trace.
   0.2 BPM across 62 to 198 on synthesised beats, silent on music without a beat, and still
   liable to report half or double on real music. Every answer carries a confidence, and
   anything under 0.5 is not reported at all.
-- **A tempo is not a beat grid.** There is no phase: the server says how far apart the
-  beats are, never where they fall. `bpmStability` says whether a fixed grid would fit at
-  all, which for anything played by people it usually would not.
+- **A grid says how well it fits, and that is the point.** `/aoide/beat-grid` returns a
+  fit rather than a list of beat times, and every fit carries the RMS distance between it
+  and the onsets it was fitted to. A track whose own beats sit 60 ms off its own grid is
+  not one anything should try to mix, and saying so is more useful than a grid that looks
+  authoritative.
+- **The key is a guess and is scored as one.** It hears which notes a track leans on, so
+  it knows nothing about modulation and is weakest between a key and its relative major or
+  minor. Meant for preferring one pair of tracks over another, never for refusing a pair.
 - **One server process.** The store is SQLite in WAL mode; it is not designed for
   several Jellyfin instances sharing one database.
 

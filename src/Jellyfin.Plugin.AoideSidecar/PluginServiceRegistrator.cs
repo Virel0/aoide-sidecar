@@ -41,6 +41,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
 
         serviceCollection.AddSingleton<SoundBoundsRepository>();
         serviceCollection.AddSingleton<AudioAnalysisRepository>();
+        serviceCollection.AddSingleton<BeatGridRepository>();
         serviceCollection.AddSingleton<Sound.IAudioMeasurer>(provider => new Sound.FfmpegAudioMeasurer(
             provider.GetRequiredService<MediaBrowser.Controller.MediaEncoding.IMediaEncoder>(),
             provider.GetRequiredService<ILogger<Sound.FfmpegAudioMeasurer>>(),
@@ -48,6 +49,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton(provider => new Sound.AudioAnalysisService(
             provider.GetRequiredService<SoundBoundsRepository>(),
             provider.GetRequiredService<AudioAnalysisRepository>(),
+            provider.GetRequiredService<BeatGridRepository>(),
             provider.GetRequiredService<Sound.IAudioMeasurer>(),
             provider.GetRequiredService<ILogger<Sound.AudioAnalysisService>>(),
             Plugin.Instance?.Configuration.SoundBoundsConcurrency ?? 1));

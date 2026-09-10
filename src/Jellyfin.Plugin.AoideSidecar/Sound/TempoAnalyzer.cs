@@ -317,6 +317,20 @@ public static class TempoAnalyzer
     }
 
     /// <summary>
+    /// Centres a whole onset signal by taking out its local mean. The beat tracker wants
+    /// the same treatment the autocorrelation gets: what stands out, not how loud the
+    /// passage was.
+    /// </summary>
+    /// <param name="onsets">Onset strength, one value per hop.</param>
+    /// <param name="rate">Onset values per second.</param>
+    /// <returns>The centred signal.</returns>
+    internal static double[] Centred(IReadOnlyList<float> onsets, double rate)
+    {
+        ArgumentNullException.ThrowIfNull(onsets);
+        return LocalMeanRemoved(onsets, 0, onsets.Count, (int)Math.Round(LocalMeanSeconds * rate));
+    }
+
+    /// <summary>
     /// Centres the onset signal by taking out its local mean, so the autocorrelation sees
     /// what stands out rather than how loud the passage was.
     /// </summary>
@@ -472,6 +486,9 @@ internal sealed class TempoScan : IPcmConsumer
     /// <summary>Above this there is nothing a beat is carried by.</summary>
     private const double HighestBandHz = 16000;
 
+    /// <summary>Bands below this are where a downbeat is found.</summary>
+    private const double LowBandTopHz = 250;
+
     /// <summary>How many bands to aim for, before bins force them apart.</summary>
     private const int TargetBands = 24;
 
@@ -485,13 +502,16 @@ internal sealed class TempoScan : IPcmConsumer
     private readonly double[] _real;
     private readonly double[] _imaginary;
     private readonly int[] _edges;
+    private readonly int _lowBands;
     private readonly double[] _previous;
     private readonly List<float> _onsets = new();
+    private readonly List<float> _low = new();
 
     private bool _havePrevious;
     private int _writeAt;
     private int _sinceHop;
     private long _seen;
+    private double _firstOnsetFrame = -1;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="TempoScan"/> class.
@@ -525,10 +545,42 @@ internal sealed class TempoScan : IPcmConsumer
 
         _edges = Bands(sampleRate, _size);
         _previous = new double[_edges.Length - 1];
+
+        // The bottom of the spectrum, kept separately: a downbeat is a kick, and a kick is
+        // far more reliably the loudest thing under 250 Hz than the loudest thing overall.
+        _lowBands = 0;
+        while (_lowBands + 1 < _previous.Length && _edges[_lowBands + 1] * (double)sampleRate / _size <= LowBandTopHz)
+        {
+            _lowBands++;
+        }
+
+        _lowBands = Math.Max(1, _lowBands);
+        SampleRate = sampleRate;
     }
 
     /// <summary>Gets the onset values per second actually used.</summary>
     public double Rate { get; }
+
+    /// <summary>Gets the file's sample rate.</summary>
+    public int SampleRate { get; }
+
+    /// <summary>Gets the onset strength, one value per hop.</summary>
+    public IReadOnlyList<float> Onsets => _onsets;
+
+    /// <summary>Gets the onset strength of the low bands alone, for finding downbeats.</summary>
+    public IReadOnlyList<float> LowOnsets => _low;
+
+    /// <summary>
+    /// Gets where the first onset value sits in the track, in milliseconds.
+    /// </summary>
+    /// <remarks>
+    /// An onset is attributed to the midpoint of the two windows whose difference produced
+    /// it. Some systematic offset of a few milliseconds is unavoidable — the flux from a
+    /// transient rises as it enters the window rather than as it passes the centre — but it
+    /// is the same offset for every track, so two tracks lined up against each other are
+    /// unaffected. It shifts an anchor, never a residual.
+    /// </remarks>
+    public double FirstOnsetMs => _firstOnsetFrame < 0 ? 0 : _firstOnsetFrame * 1000 / SampleRate;
 
     /// <inheritdoc />
     public void Feed(ReadOnlySpan<float> samples)
@@ -607,6 +659,7 @@ internal sealed class TempoScan : IPcmConsumer
         _fft.Transform(_real, _imaginary);
 
         double risen = 0;
+        double low = 0;
         for (var band = 0; band < _previous.Length; band++)
         {
             double power = 0;
@@ -620,13 +673,25 @@ internal sealed class TempoScan : IPcmConsumer
             var density = power / (_size * _taperPower * (_edges[band + 1] - _edges[band]));
             var energy = Math.Log(1 + (CompressionGain * density));
 
-            risen += Math.Max(0, energy - _previous[band]);
+            var rise = Math.Max(0, energy - _previous[band]);
+            risen += rise;
+            if (band < _lowBands)
+            {
+                low += rise;
+            }
+
             _previous[band] = energy;
         }
 
         if (_havePrevious)
         {
+            if (_firstOnsetFrame < 0)
+            {
+                _firstOnsetFrame = _seen - (_size / 2.0) - (_hop / 2.0);
+            }
+
             _onsets.Add((float)(risen / _previous.Length));
+            _low.Add((float)(low / _lowBands));
         }
 
         _havePrevious = true;

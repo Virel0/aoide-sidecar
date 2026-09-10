@@ -14,6 +14,7 @@ public sealed class AudioAnalysisServiceTests : IDisposable
     private readonly string _directory;
     private readonly SoundBoundsRepository _bounds;
     private readonly AudioAnalysisRepository _analysis;
+    private readonly BeatGridRepository _grids;
     private readonly FakeMeasurer _measurer = new();
     private readonly AudioAnalysisService _service;
     private readonly string _file;
@@ -25,7 +26,9 @@ public sealed class AudioAnalysisServiceTests : IDisposable
         var database = new SyncDatabase(Path.Combine(_directory, "s.db"), NullLogger<SyncDatabase>.Instance);
         _bounds = new SoundBoundsRepository(database);
         _analysis = new AudioAnalysisRepository(database);
-        _service = new AudioAnalysisService(_bounds, _analysis, _measurer, NullLogger<AudioAnalysisService>.Instance);
+        _grids = new BeatGridRepository(database);
+        _service = new AudioAnalysisService(
+            _bounds, _analysis, _grids, _measurer, NullLogger<AudioAnalysisService>.Instance);
         _file = Path.Combine(_directory, "track.flac");
         File.WriteAllText(_file, "not really audio");
     }
@@ -214,6 +217,80 @@ public sealed class AudioAnalysisServiceTests : IDisposable
         Assert.False(bounds.Pending);
         Assert.Equal(new SoundBounds(1940, 5200), bounds.Row!.Bounds);
         Assert.Equal(1, _measurer.Calls);
+    }
+
+    /// <summary>
+    /// The third cache filled by the same decode. A client that asked about silence has
+    /// paid for the beat grid too.
+    /// </summary>
+    [Fact]
+    public async Task One_decode_fills_the_beat_grid_cache_as_well()
+    {
+        var grid = new BeatGrid(
+            new[] { new BeatSegment(0, 180000, 495.3, 128.0, 3.9, 384) },
+            4,
+            0,
+            15431,
+            167431);
+        _measurer.Result = new AudioMeasurement(
+            new SoundBounds(1940, 5200),
+            new Loudness(-9.7, -0.3),
+            new Tempo(128, 1.0, 1.0),
+            grid,
+            new MusicalKey("8A", 0.71));
+
+        await _service.LookupAsync(new[] { ("t1", _file) }, default);
+        await _service.DrainAsync(default);
+
+        var lookup = (await _service.LookupGridAsync(new[] { ("t1", _file) }, default))["t1"];
+
+        Assert.False(lookup.Pending);
+
+        // Compared field by field: a record's generated equality treats its segment list
+        // by reference, so an array and the list read back from JSON never match.
+        var stored = lookup.Row!.Grid!;
+        Assert.Equal(grid.Segments, stored.Segments);
+        Assert.Equal(grid.BeatsPerBar, stored.BeatsPerBar);
+        Assert.Equal(grid.DownbeatIndex, stored.DownbeatIndex);
+        Assert.Equal(grid.MixInMs, stored.MixInMs);
+        Assert.Equal(grid.MixOutMs, stored.MixOutMs);
+        Assert.Equal(new MusicalKey("8A", 0.71), lookup.Row.Key);
+        Assert.Equal(1, _measurer.Calls);
+    }
+
+    /// <summary>
+    /// Segments go into one column as JSON, so a round trip through the database is worth
+    /// asserting on rather than assuming.
+    /// </summary>
+    [Fact]
+    public async Task Several_segments_survive_the_round_trip()
+    {
+        _measurer.Result = new AudioMeasurement(
+            null,
+            null,
+            new Tempo(128, 1.0, 0.4),
+            new BeatGrid(
+                new[]
+                {
+                    new BeatSegment(0, 96000, 431.2, 128.02, 9.4, 205),
+                    new BeatSegment(96000, 214000, 96210.5, 140.01, 11.8, 275)
+                },
+                4,
+                0,
+                null,
+                null),
+            null);
+
+        await _service.LookupGridAsync(new[] { ("t1", _file) }, default);
+        await _service.DrainAsync(default);
+
+        var row = (await _service.LookupGridAsync(new[] { ("t1", _file) }, default))["t1"].Row;
+
+        Assert.Equal(2, row!.Grid!.Segments.Count);
+        Assert.Equal(140.01, row.Grid.Segments[1].Bpm);
+        Assert.Equal(96210.5, row.Grid.Segments[1].AnchorMs);
+        Assert.Null(row.Grid.MixInMs);
+        Assert.Null(row.Key);
     }
 
     /// <summary>

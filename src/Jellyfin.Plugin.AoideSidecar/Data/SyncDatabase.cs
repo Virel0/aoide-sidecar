@@ -23,7 +23,7 @@ namespace Jellyfin.Plugin.AoideSidecar.Data;
 /// </remarks>
 public sealed class SyncDatabase
 {
-    private const int CurrentSchemaVersion = 7;
+    private const int CurrentSchemaVersion = 8;
 
     private static readonly string[] Migrations =
     {
@@ -198,6 +198,28 @@ public sealed class SyncDatabase
         ALTER TABLE audio_analysis ADD COLUMN bpm_stability REAL;
 
         DELETE FROM audio_analysis WHERE source = 'server';
+        """,
+
+        // v8 — where the beats actually fall, from the same decode again.
+        //
+        // Segments are JSON in one column: they vary in number, are only ever read and
+        // written whole, and are the server's own shape rather than a client payload, so a
+        // table of their own would buy nothing but joins.
+        """
+        CREATE TABLE IF NOT EXISTS beat_grids (
+            jellyfin_id    TEXT PRIMARY KEY,
+            mtime_ticks    INTEGER NOT NULL,
+            segments       TEXT,
+            beats_per_bar  INTEGER,
+            downbeat_index INTEGER,
+            mix_in_ms      REAL,
+            mix_out_ms     REAL,
+            key_camelot    TEXT,
+            key_confidence REAL,
+            source         TEXT NOT NULL,
+            error          TEXT,
+            measured_at    INTEGER NOT NULL
+        );
         """
     };
 

@@ -18,8 +18,8 @@ GET  /aoide/sync/pull?since=<cursor>&limit=<n>
 ```
 
 Everything else hangs off `/aoide` on the same server: `/aoide/images`, `/aoide/export`,
-`/aoide/shares`, `/aoide/queue`, `/aoide/match`, `/aoide/sound-bounds` and
-`/aoide/audio-analysis`, each described in its own section below.
+`/aoide/shares`, `/aoide/queue`, `/aoide/match`, `/aoide/sound-bounds`,
+`/aoide/audio-analysis` and `/aoide/beat-grid`, each described in its own section below.
 
 ```
 Authorization: MediaBrowser Token="<the user's Jellyfin access token>"
@@ -780,6 +780,117 @@ Nothing here is user data. These are facts about a file, recomputable at any tim
 the file itself, so there is no op log, no export, no retention rule and nothing to
 resolve between devices. Do not push them as ops — `audio_analysis` is not an accepted
 entity and never will be.
+
+## Beat grid
+
+Added in 1.13.0.0. Where the beats actually fall, which is a different measurement from
+how far apart they are and the one a mixed transition needs.
+
+```
+GET /aoide/beat-grid?ids=<jellyfinId>,…      (≤ 200)
+```
+
+```json
+{ "grids": {
+    "3b1c…": {
+      "segments": [
+        { "startMs": 0, "endMs": 214000, "anchorMs": 495.3, "bpm": 128.0, "residualMs": 3.9, "beats": 456 }
+      ],
+      "beatsPerBar": 4, "downbeatIndex": 0,
+      "mixInMs": 15431, "mixOutMs": 187431,
+      "key": "8A", "keyConfidence": 0.71 },
+    "a71f…": null },
+  "pending": ["9c0e…"] }
+```
+
+`pending`, `null` and a missing id mean what they mean everywhere else in this family:
+queued, measured with no grid worth having, and unknown-or-invisible. Same decode as the
+other two, so a track already measured for its loudness has a grid waiting.
+
+There is **no `POST`**. The other two accept a client's own measurement because a client
+holding the file can take one; a client that could fit its own beat grid would not have
+needed this endpoint. Ask if that turns out to be wrong.
+
+### The fit
+
+`beat(n) = anchorMs + n × 60000 / bpm`, within a segment.
+
+**`residualMs` is the field that decides whether a transition runs at all.** It is the RMS
+distance between the fitted beats and the beats actually detected. Sixteen bars at 128 BPM
+is thirty seconds; holding a twentieth of a beat across that wants a grid good to about
+20 ms, and a track whose own onsets sit 60 ms off its own fit is not one anything should
+try to lock to. Refusing on it is the intended use.
+
+On sequenced material the fit comes back at **3–5 ms** residual with the anchor within
+5 ms of the true first beat. Expect worse on anything played by people; that is what the
+number is for.
+
+`bpm` here is fitted across the whole segment and is more precise than the `bpm` from
+`/aoide/audio-analysis`, which is measured a different way. Where they disagree slightly,
+this one is the one to mix on.
+
+### Segments
+
+Most tracks are one. A track that genuinely changes tempo comes back as several, each
+with its own anchor, tempo and residual, rather than one fit smeared across the change
+describing neither half. Segments are contiguous and cover the track end to end, so a
+lookup for "which segment holds this moment" always has an answer.
+
+**Mix within a segment.** A blend that crosses a boundary is crossing a tempo change.
+
+### The meter
+
+`beatsPerBar` is 4 for nearly everything and 3 for a waltz; both it and `downbeatIndex`
+are `null` when the meter could not be established, and a client should not offer a
+bar-aligned transition for that track.
+
+Downbeats are found in the bottom 250 Hz, where a kick lives — far more reliable than
+whatever is loudest overall. Four is preferred; three has to beat it by a clear margin
+before a waltz is believed.
+
+`downbeatIndex` is **0 whenever the meter is known.** Every segment's beat zero is put on
+a downbeat, so `bar(n) = anchorMs + n × beatsPerBar × 60000 / bpm` holds for every segment
+without tracking phase across a tempo change. The field is kept because it is in the
+contract and because a future grid might not be able to promise that.
+
+### Mix points
+
+`mixInMs` and `mixOutMs` are downbeats of the fit, and are `null` together with the meter.
+
+They are measured on onset strength rather than loudness, which is what makes an intro of
+pure atmosphere read as *not yet playing*: a sustained pad can be as loud as the chorus
+with nothing starting in it. Every bar of a four-bar phrase has to carry its weight, not
+the phrase on average — averaging let a strong second half drag a silent first half over
+the line and put the start of a blend four seconds inside a twenty-second pad.
+
+### The key
+
+`key` is on the **Camelot wheel** — `8A` is A minor, `8B` is C major — because the stated
+use is preferring one pair of tracks over another, and adjacency on that wheel is the
+whole point of it. Letter `A` is minor, `B` is major; neighbouring numbers and the same
+number in the other letter are the compatible moves.
+
+| | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| **A** (minor) | G♯m | E♭m | B♭m | Fm | Cm | Gm | Dm | Am | Em | Bm | F♯m | C♯m |
+| **B** (major) | B | F♯ | D♭ | A♭ | E♭ | B♭ | F | C | G | D | A | E |
+
+It is Krumhansl–Kessler profile matching over a chroma taken with a longer transform than
+the onsets use — 186 ms rather than 23 ms, because pitch wants frequency resolution where
+onsets want timing. It hears which notes a track leans on and nothing else, so it has no
+idea about modulation and is weakest between a key and its relative major or minor, which
+share the same seven notes. `keyConfidence` is the margin over the runner-up, which is
+exactly where that weakness shows up. Use it to prefer a pair, never to refuse one.
+
+**Untested on real music.** The estimator is right on synthesised progressions, including
+the C major / A minor pair. Nobody has run it over a real library yet. Treat a low
+confidence as meaning what it says.
+
+### What is deliberately not here
+
+No stems, no per-instrument separation, no neural model. Aligning two clocks, running one
+deck at the other's tempo, and taking the bass out of the outgoing track on a downbeat are
+the client's job, and the grid is what makes them possible.
 
 ## Invariants only the client can enforce
 

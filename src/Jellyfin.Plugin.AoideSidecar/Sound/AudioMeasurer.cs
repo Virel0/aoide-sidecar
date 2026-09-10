@@ -97,6 +97,7 @@ public sealed class FfmpegAudioMeasurer : IAudioMeasurer
 
         var bounds = new SoundBoundsScan(channels, sampleRate);
         var tempo = new TempoScan(channels, sampleRate);
+        var chroma = new ChromaScan(channels, sampleRate);
         long frames;
 
         try
@@ -104,7 +105,7 @@ public sealed class FfmpegAudioMeasurer : IAudioMeasurer
             // The scans read the pipe as ffmpeg fills it, so a long file never sits in
             // memory whole.
             frames = await Task.Run(
-                () => PcmPump.Run(ffmpeg.StandardOutput.BaseStream, channels, new IPcmConsumer[] { bounds, tempo }),
+                () => PcmPump.Run(ffmpeg.StandardOutput.BaseStream, channels, new IPcmConsumer[] { bounds, tempo, chroma }),
                 deadline.Token).ConfigureAwait(false);
             await ffmpeg.WaitForExitAsync(deadline.Token).ConfigureAwait(false);
         }
@@ -126,7 +127,16 @@ public sealed class FfmpegAudioMeasurer : IAudioMeasurer
             ? LoudnessAnalyzer.Parse(log)
             : null;
 
-        return new AudioMeasurement(bounds.Result(), loudness, tempo.Result());
+        var beat = tempo.Result();
+        var grid = BeatGridAnalyzer.Analyze(
+            tempo.Onsets,
+            tempo.LowOnsets,
+            tempo.Rate,
+            tempo.FirstOnsetMs,
+            frames * 1000.0 / sampleRate,
+            beat);
+
+        return new AudioMeasurement(bounds.Result(), loudness, beat, grid, chroma.Result());
     }
 
     private async Task<(int Channels, int SampleRate)> ProbeAsync(string path, CancellationToken cancellationToken)
