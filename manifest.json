@@ -9,6 +9,14 @@
         "imageUrl": "",
         "versions": [
             {
+                "version": "1.15.0.0",
+                "changelog": "GET /aoide/arrangement: sections with a kind and an energy, a phrase grid, and rough vocal spans, all from the same decode. Sections come from self-similarity and are named only where the signal settles it \u2014 verse and chorus are never returned. Vocal spans have three states: found, none found, and could-not-tell, which is not an instrumental. Also fixes two things the rig caught: a short loud passage could decide a whole track's tempo (thirty seconds of sung syllables turned a 128 BPM track into 73), and a beat-free breakdown could invent a tempo change in the beat grid. Server-measured tempo and grid rows are re-taken on upgrade.",
+                "targetAbi": "10.11.0.0",
+                "sourceUrl": "https://github.com/Virel0/aoide-sidecar/releases/download/v1.15.0.0/aoide-sidecar_1.15.0.0.zip",
+                "checksum": "8434b972d76eff5957a00d8e7e378fc5",
+                "timestamp": "2026-09-10T22:20:07Z"
+            },
+            {
                 "version": "1.14.0.0",
                 "changelog": "GET /aoide/analysis/coverage: how many tracks the library holds, how many have sound bounds, loudness and tempo, and beat grids stored, how many are decoding right now, and a sentence summarising it. Measurement is lazy, so until now there was no way to see how far along it was without asking about every track individually.",
                 "targetAbi": "10.11.0.0",
