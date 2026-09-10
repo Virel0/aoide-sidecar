@@ -32,4 +32,9 @@
     <EmbeddedResource Include="Configuration\configPage.html" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The measurement scans and the response projection are tested directly. -->
+    <InternalsVisibleTo Include="Jellyfin.Plugin.AoideSidecar.Tests" />
+  </ItemGroup>
+
 </Project>

@@ -23,7 +23,7 @@ namespace Jellyfin.Plugin.AoideSidecar.Data;
 /// </remarks>
 public sealed class SyncDatabase
 {
-    private const int CurrentSchemaVersion = 5;
+    private const int CurrentSchemaVersion = 6;
 
     private static readonly string[] Migrations =
     {
@@ -149,6 +149,30 @@ public sealed class SyncDatabase
             mtime_ticks    INTEGER NOT NULL,
             sound_start_ms INTEGER,
             sound_end_ms   INTEGER,
+            source         TEXT NOT NULL,
+            error          TEXT,
+            measured_at    INTEGER NOT NULL
+        );
+        """,
+
+        // v6 — loudness and tempo, from the same decode as the sound bounds above.
+        //
+        // A separate table rather than more columns on sound_bounds, because a client may
+        // post either measurement on its own and an upsert of one must not blank the
+        // other. Both are keyed the same way and filled by the same job, so a file asked
+        // about for either is decoded once.
+        //
+        // The tempo confidence is stored as measured. The threshold below which a tempo
+        // is not worth reporting is applied when the row is served, so it can be
+        // reconsidered without decoding the library again.
+        """
+        CREATE TABLE IF NOT EXISTS audio_analysis (
+            jellyfin_id    TEXT PRIMARY KEY,
+            mtime_ticks    INTEGER NOT NULL,
+            loudness_lufs  REAL,
+            true_peak_dbfs REAL,
+            bpm            REAL,
+            bpm_confidence REAL,
             source         TEXT NOT NULL,
             error          TEXT,
             measured_at    INTEGER NOT NULL

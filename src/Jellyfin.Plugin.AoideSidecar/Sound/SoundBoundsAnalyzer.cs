@@ -59,80 +59,90 @@ public static class SoundBoundsAnalyzer
         ArgumentOutOfRangeException.ThrowIfLessThan(channels, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(sampleRate, 1);
 
-        var frameBytes = channels * sizeof(float);
+        var scan = new SoundBoundsScan(channels, sampleRate);
+        PcmPump.Run(pcm, channels, new IPcmConsumer[] { scan });
+        return scan.Result();
+    }
 
-        // A chunk of whole frames. Bytes that arrive short of a frame boundary are held
-        // over to the next read rather than split across a sample.
-        var buffer = new byte[frameBytes * 16_384];
-        var held = 0;
+    // Swift's Duration.milliseconds(Int64((frames / rate * 1000).rounded())): .rounded()
+    // is schoolbook rounding, halves away from zero, not the banker's rounding .NET
+    // defaults to. A half-millisecond frame position must land on the same side.
+    internal static long ToMilliseconds(long frames, int sampleRate) =>
+        (long)Math.Round(frames / (double)sampleRate * 1000, MidpointRounding.AwayFromZero);
+}
 
-        long total = 0;
-        long? firstLoud = null;
-        long? lastLoud = null;
+/// <summary>
+/// The scan itself, as a consumer, so the same decode can also be measured for loudness
+/// and tempo. <see cref="SoundBoundsAnalyzer.Analyze"/> is this class over one stream.
+/// </summary>
+internal sealed class SoundBoundsScan : IPcmConsumer
+{
+    private readonly int _channels;
+    private readonly int _sampleRate;
 
-        while (true)
+    private long _total;
+    private long? _firstLoud;
+    private long? _lastLoud;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SoundBoundsScan"/> class.
+    /// </summary>
+    /// <param name="channels">Channels per frame.</param>
+    /// <param name="sampleRate">Frames per second.</param>
+    public SoundBoundsScan(int channels, int sampleRate)
+    {
+        _channels = channels;
+        _sampleRate = sampleRate;
+    }
+
+    /// <inheritdoc />
+    public void Feed(ReadOnlySpan<float> samples)
+    {
+        var frames = samples.Length / _channels;
+        for (var frame = 0; frame < frames; frame++)
         {
-            var read = pcm.Read(buffer, held, buffer.Length - held);
-            if (read <= 0)
+            var loud = false;
+            var at = frame * _channels;
+            for (var channel = 0; channel < _channels; channel++)
             {
-                break;
-            }
-
-            var available = held + read;
-            var frames = available / frameBytes;
-            var span = buffer.AsSpan(0, frames * frameBytes);
-
-            for (var frame = 0; frame < frames; frame++)
-            {
-                var loud = false;
-                var at = frame * frameBytes;
-                for (var channel = 0; channel < channels; channel++)
+                if (Math.Abs(samples[at + channel]) > SoundBoundsAnalyzer.Threshold)
                 {
-                    var sample = BitConverter.ToSingle(span.Slice(at + (channel * sizeof(float)), sizeof(float)));
-                    if (Math.Abs(sample) > Threshold)
-                    {
-                        loud = true;
-                        break;
-                    }
-                }
-
-                if (loud)
-                {
-                    var index = total + frame;
-                    firstLoud ??= index;
-                    lastLoud = index;
+                    loud = true;
+                    break;
                 }
             }
 
-            total += frames;
-
-            held = available - (frames * frameBytes);
-            if (held > 0)
+            if (loud)
             {
-                Buffer.BlockCopy(buffer, frames * frameBytes, buffer, 0, held);
+                var index = _total + frame;
+                _firstLoud ??= index;
+                _lastLoud = index;
             }
         }
 
-        if (total == 0 || firstLoud is null || lastLoud is null)
+        _total += frames;
+    }
+
+    /// <summary>
+    /// The span, once the whole file has been fed.
+    /// </summary>
+    /// <returns>The bounds, or null when there is nothing worth trimming.</returns>
+    public SoundBounds? Result()
+    {
+        if (_total == 0 || _firstLoud is null || _lastLoud is null)
         {
             return null;
         }
 
-        var length = ToMilliseconds(total, sampleRate);
-        var start = Math.Max(0, ToMilliseconds(firstLoud.Value, sampleRate) - LeadMarginMs);
-        var end = Math.Min(length, ToMilliseconds(lastLoud.Value, sampleRate) + TailMarginMs);
+        var length = SoundBoundsAnalyzer.ToMilliseconds(_total, _sampleRate);
+        var start = Math.Max(0, SoundBoundsAnalyzer.ToMilliseconds(_firstLoud.Value, _sampleRate) - SoundBoundsAnalyzer.LeadMarginMs);
+        var end = Math.Min(length, SoundBoundsAnalyzer.ToMilliseconds(_lastLoud.Value, _sampleRate) + SoundBoundsAnalyzer.TailMarginMs);
 
-        if (start < MinimumTrimMs && length - end < MinimumTrimMs)
+        if (start < SoundBoundsAnalyzer.MinimumTrimMs && length - end < SoundBoundsAnalyzer.MinimumTrimMs)
         {
             return null;
         }
 
         return new SoundBounds(start, end);
     }
-
-    // Swift's Duration.milliseconds(Int64((frames / rate * 1000).rounded())): .rounded()
-    // is schoolbook rounding, halves away from zero, not the banker's rounding .NET
-    // defaults to. A half-millisecond frame position must land on the same side.
-    private static long ToMilliseconds(long frames, int sampleRate) =>
-        (long)Math.Round(frames / (double)sampleRate * 1000, MidpointRounding.AwayFromZero);
 }

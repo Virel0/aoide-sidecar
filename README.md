@@ -2,8 +2,9 @@
 
 A Jellyfin plugin that gives a music app the things Jellyfin's music model is bad at:
 playlists that sync between devices, collaborative playlists, real play history,
-resume-across-devices, playlist artwork, silence trimming for gapless playback, and a
-matcher for importing playlists from elsewhere.
+resume-across-devices, playlist artwork, silence trimming for gapless playback, loudness
+and tempo for a library mastered decades apart, and a matcher for importing playlists
+from elsewhere.
 
 It is the server half of [Aoide](#the-aoide-apps). Jellyfin stays the source of truth
 for files, tags, artwork and which music exists at all. The sidecar owns everything
@@ -28,17 +29,18 @@ SQLite. Offline is not a degraded mode; it is the normal mode that sometimes als
 | Resume playback on another device | `GET /aoide/queue` | 1.7.0.0 |
 | Match an imported track list against the library | `POST /aoide/match` | 1.8.0.0 |
 | Where each track's sound starts and stops | `GET`/`POST /aoide/sound-bounds` | 1.10.0.0 |
+| How loud each track is and how fast | `GET`/`POST /aoide/audio-analysis` | 1.11.0.0 |
 
 Two scheduled tasks exist and both are **off by default**, switchable on the plugin's
-configuration page: a nightly playlist export, and a library-wide sound-bounds sweep
-(hours of decoding on a large library; tracks are measured on request regardless).
+configuration page: a nightly playlist export, and a library-wide analysis sweep (hours
+of decoding on a large library; tracks are measured on request regardless).
 
 ## Requirements
 
 - Jellyfin **10.11.x**. The plugin targets `Jellyfin.Controller` 10.11.11 on .NET 9 and
   ships as a single DLL.
-- The bundled ffmpeg Jellyfin already has — used for sound bounds, found through
-  Jellyfin's own encoder path rather than `PATH`.
+- The bundled ffmpeg Jellyfin already has — used for every audio measurement, found
+  through Jellyfin's own encoder path rather than `PATH`. Nothing else needs installing.
 
 Every endpoint takes a normal Jellyfin **user** token. An admin API key returns 401: it
 carries no user id, and everything here is scoped to a user.
@@ -137,6 +139,13 @@ trace.
 - **Sound bounds match the phone exactly for lossless files.** The measurement is the
   client's algorithm ported line for line over ffmpeg-decoded PCM. For lossy files the
   two decoders can differ by samples, inside the trim margins.
+- **A file is decoded once for all of it.** Sound bounds, loudness and tempo come out of
+  a single ffmpeg pass, so asking for any one of them fills the cache for the others.
+- **Tempo is an estimate and says so.** Loudness is ffmpeg's own R128 measurement and is
+  exact. Tempo is envelope autocorrelation in managed code — accurate to about a beat per
+  minute on music with a beat, silent on music without one, and prone to reporting half or
+  double. Every answer carries a confidence, and anything under 0.5 is not reported at
+  all. Good enough to order a mix by; not good enough to beat-match on.
 - **One server process.** The store is SQLite in WAL mode; it is not designed for
   several Jellyfin instances sharing one database.
 

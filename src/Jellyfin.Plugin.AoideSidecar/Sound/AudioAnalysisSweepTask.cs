@@ -13,21 +13,23 @@ namespace Jellyfin.Plugin.AoideSidecar.Sound;
 /// </summary>
 /// <remarks>
 /// Off by default: a first run over a large library is hours of decoding, and that is a
-/// choice for the person running the server, not a side effect of a plugin update.
+/// choice for the person running the server, not a side effect of a plugin update. One
+/// run covers sound bounds, loudness and tempo together, because they come out of the
+/// same decode.
 /// </remarks>
-public class SoundBoundsSweepTask : IScheduledTask, IConfigurableScheduledTask
+public class AudioAnalysisSweepTask : IScheduledTask, IConfigurableScheduledTask
 {
-    private readonly SoundBoundsService _service;
+    private readonly AudioAnalysisService _service;
     private readonly ILibraryManager _libraryManager;
-    private readonly ILogger<SoundBoundsSweepTask> _logger;
+    private readonly ILogger<AudioAnalysisSweepTask> _logger;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="SoundBoundsSweepTask"/> class.
+    /// Initializes a new instance of the <see cref="AudioAnalysisSweepTask"/> class.
     /// </summary>
     /// <param name="service">The measurement service.</param>
     /// <param name="libraryManager">Jellyfin's library.</param>
     /// <param name="logger">Logger.</param>
-    public SoundBoundsSweepTask(SoundBoundsService service, ILibraryManager libraryManager, ILogger<SoundBoundsSweepTask> logger)
+    public AudioAnalysisSweepTask(AudioAnalysisService service, ILibraryManager libraryManager, ILogger<AudioAnalysisSweepTask> logger)
     {
         _service = service;
         _libraryManager = libraryManager;
@@ -35,15 +37,21 @@ public class SoundBoundsSweepTask : IScheduledTask, IConfigurableScheduledTask
     }
 
     /// <inheritdoc />
-    public string Name => "Measure sound bounds for the library";
+    public string Name => "Analyse the library's audio";
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Unchanged from when this only measured sound bounds. Jellyfin stores a task's
+    /// triggers and its enabled state against this key, so renaming it would silently
+    /// discard whatever schedule the server's owner had set.
+    /// </remarks>
     public string Key => "AoideSidecarSoundBoundsSweep";
 
     /// <inheritdoc />
     public string Description =>
-        "Finds where each track's sound starts and stops so clients can trim the silence recordings carry. "
-        + "Decodes every track once; a large library takes hours the first time.";
+        "Measures where each track's sound starts and stops, how loud it is, and how fast, so clients can trim "
+        + "silence and level playback across a library mastered decades apart. Decodes every track once; a large "
+        + "library takes hours the first time.";
 
     /// <inheritdoc />
     public string Category => "Aoide Sidecar";
@@ -85,18 +93,24 @@ public class SoundBoundsSweepTask : IScheduledTask, IConfigurableScheduledTask
             return;
         }
 
-        // Lookup queues whatever is missing or stale and reports the rest as current.
+        // Lookup queues whatever is missing or stale and reports the rest as current. Both
+        // caches are consulted because either can be the stale one, and a track queued
+        // twice is queued once: the job is keyed by id and fills both.
         var queued = 0;
         const int batch = 500;
         for (var i = 0; i < tracks.Count; i += batch)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var lookups = await _service.LookupAsync(tracks.Skip(i).Take(batch).ToList(), cancellationToken).ConfigureAwait(false);
-            queued += lookups.Values.Count(l => l.Pending);
+            var slice = tracks.Skip(i).Take(batch).ToList();
+            var bounds = await _service.LookupAsync(slice, cancellationToken).ConfigureAwait(false);
+            var analysis = await _service.LookupAnalysisAsync(slice, cancellationToken).ConfigureAwait(false);
+            queued += slice.Count(t =>
+                (bounds.TryGetValue(t.Id, out var b) && b.Pending)
+                || (analysis.TryGetValue(t.Id, out var a) && a.Pending));
             progress.Report(Math.Min(50, (i + batch) * 50.0 / tracks.Count));
         }
 
-        _logger.LogInformation("Sound-bounds sweep: {Queued} of {Total} tracks queued for measurement", queued, tracks.Count);
+        _logger.LogInformation("Audio analysis sweep: {Queued} of {Total} tracks queued for measurement", queued, tracks.Count);
 
         // Then wait for the queue so the task's progress means something.
         var started = _service.InFlight;

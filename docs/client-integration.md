@@ -17,6 +17,10 @@ POST /aoide/sync/push
 GET  /aoide/sync/pull?since=<cursor>&limit=<n>
 ```
 
+Everything else hangs off `/aoide` on the same server: `/aoide/images`, `/aoide/export`,
+`/aoide/shares`, `/aoide/queue`, `/aoide/match`, `/aoide/sound-bounds` and
+`/aoide/audio-analysis`, each described in its own section below.
+
 ```
 Authorization: MediaBrowser Token="<the user's Jellyfin access token>"
 ```
@@ -656,6 +660,95 @@ Treat them as the same answer.
 Optional. A client that measured a file itself may send the result so the server serves
 it without decoding. It is stored as-is, keyed on the file's current modification time,
 and served with `source: client` internally; it is not re-measured.
+
+## Loudness and tempo
+
+Added in 1.11.0.0. Two facts about a file that neither client can work out for something
+it is streaming, and that nobody wants to compute on a phone for a library of thousands.
+
+```
+GET  /aoide/audio-analysis?ids=<jellyfinId>,…      (≤ 200)
+POST /aoide/audio-analysis  { analysis: { id: { loudnessLufs, truePeakDbfs, bpm, bpmConfidence } | null } }
+```
+
+```json
+{ "analysis": { "3b1c…": { "loudnessLufs": -9.7, "truePeakDbfs": -0.3,
+                           "bpm": 128.0, "bpmConfidence": 0.82 },
+                "a71f…": { "loudnessLufs": -14.2, "truePeakDbfs": -1.1,
+                           "bpm": null, "bpmConfidence": null },
+                "c904…": null },
+  "pending": ["9c0e…"] }
+```
+
+`pending`, `null` and a missing id mean exactly what they mean for sound bounds: queued,
+measured with nothing to report, and unknown-or-invisible. Every field is independently
+nullable — a track can have a loudness and no usable tempo, which is the common case for
+ambient and for anything rubato.
+
+**It is the same decode.** Asking either endpoint about a file measures it for both, so a
+client that has already fetched sound bounds for a playlist gets its loudness and tempo
+without the server decoding anything again. Both caches are keyed on the file's
+modification time, and a replaced file re-measures for both.
+
+### Loudness
+
+`loudnessLufs` is EBU R128 integrated loudness over the whole track and `truePeakDbfs` is
+its true peak, both straight out of `ffmpeg -af loudnorm=print_format=json` — the
+implementation the spec pins, rather than a second R128 implementation that would agree
+with it only approximately. A track under three seconds, or quieter than −70 LUFS, is not
+measured and reports `null`: `loudnorm`'s gating has not seen enough audio to mean
+anything.
+
+`truePeakDbfs` above zero is not an error. A track clipped by its own master really does
+peak above full scale, and that is exactly what a client needs to know it has no headroom.
+
+Normalise to **−18 LUFS** and attenuate only, as agreed: gain is `−18 − loudnessLufs` dB,
+and a track already quieter than the reference is left alone rather than amplified into
+its own peak. A file carrying ReplayGain tags should use those; this is for the ones that
+do not.
+
+### Tempo
+
+`bpm` is beats per minute and `bpmConfidence` is between 0 and 1. **A tempo the server is
+not at least 0.5 confident of is not sent at all** — you will see `bpm: null` with a
+loudness beside it. That is deliberate: ambient, spoken word and rubato classical have no
+single tempo, and a made-up 128 would be sorted against as though it were true.
+
+`aubio` and Essentia were both suggested and neither is available: Jellyfin ships ffmpeg
+and nothing else, and the sidecar is a single managed DLL that Jellyfin's own installer
+drops into place. Requiring a server admin to install a native library before a plugin
+works is out of all proportion to two numbers used for ordering. So the estimate is the
+classic envelope autocorrelation — energy per 10 ms of a Hann-windowed span, log
+compressed, differenced into an onset strength, autocorrelated over the lags that
+correspond to 60–200 BPM.
+
+What that means in practice:
+
+- **It is good on anything with a beat and honest about everything else.** Synthesised
+  beats at 90 through 170 BPM come back within about a beat per minute, at full
+  confidence. A held tone, silence, noise, and anything under ten seconds come back with
+  no tempo at all.
+- **Half and double are the failure mode.** An envelope that repeats every beat also
+  repeats every two beats, and correlates equally well with both. A preference for tempi
+  near 120, and a rule that takes the shorter period when it explains the envelope just as
+  well, settle it in the ordinary case — but a track reported at 85 that you would call
+  170 is the shape of the mistake to expect.
+- **Do not beat-match on it yet.** It is precise enough to order a mix by and not
+  precise enough to align a transition to. That was the agreed sequencing anyway.
+
+### `POST` — a client sharing what it measured
+
+Optional, and the same shape as the response. `loudnessLufs` and `truePeakDbfs` go
+together: send both or neither. `bpm` without a `bpmConfidence` is taken at face value.
+A posted tempo is stored at whatever confidence it carries and filtered on the way out
+like any other, so posting one below 0.5 stores it and serves nothing.
+
+### Not a sync entity
+
+Nothing here is user data. These are facts about a file, recomputable at any time from
+the file itself, so there is no op log, no export, no retention rule and nothing to
+resolve between devices. Do not push them as ops — `audio_analysis` is not an accepted
+entity and never will be.
 
 ## Invariants only the client can enforce
 

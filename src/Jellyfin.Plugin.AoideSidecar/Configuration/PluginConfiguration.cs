@@ -76,17 +76,19 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool EnableScheduledExport { get; set; }
 
     /// <summary>
-    /// Gets or sets a value indicating whether the nightly sound-bounds sweep runs.
+    /// Gets or sets a value indicating whether the nightly audio-analysis sweep runs.
     /// </summary>
     /// <remarks>
     /// Off by default. The sweep decodes every track in the library once, which on a
     /// large library is hours of CPU — a choice for whoever runs the server, not a side
     /// effect of a plugin update. Measurement still happens lazily on request either way.
+    /// The name predates loudness and tempo joining the same pass; renaming it would
+    /// silently reset the setting on every server that had turned it on.
     /// </remarks>
     public bool EnableSoundBoundsSweep { get; set; }
 
     /// <summary>
-    /// Gets or sets how many files may decode at once for sound bounds.
+    /// Gets or sets how many files may be decoded and analysed at once.
     /// </summary>
     /// <remarks>
     /// One by default, so a first sync of a large playlist queues decodes rather than
@@ -95,7 +97,7 @@ public class PluginConfiguration : BasePluginConfiguration
     public int SoundBoundsConcurrency { get; set; } = 1;
 
     /// <summary>
-    /// Gets or sets the longest a single sound-bounds decode may run, in seconds.
+    /// Gets or sets the longest a single decode and analysis may run, in seconds.
     /// </summary>
     public int SoundBoundsTimeoutSeconds { get; set; } = 180;
 

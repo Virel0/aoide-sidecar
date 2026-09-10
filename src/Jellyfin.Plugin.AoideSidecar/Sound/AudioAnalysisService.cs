@@ -6,14 +6,21 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.AoideSidecar.Sound;
 
 /// <summary>
-/// What the service knows about one requested file right now.
+/// What the service knows about one requested file's sound bounds right now.
 /// </summary>
 /// <param name="Row">The cached row, when current.</param>
 /// <param name="Pending">True when a measurement has been queued and the row is not yet usable.</param>
 public sealed record SoundBoundsLookup(SoundBoundsRow? Row, bool Pending);
 
 /// <summary>
-/// Serves measurements from the cache and queues the ones it does not have.
+/// What the service knows about one requested file's loudness and tempo right now.
+/// </summary>
+/// <param name="Row">The cached row, when current.</param>
+/// <param name="Pending">True when a measurement has been queued and the row is not yet usable.</param>
+public sealed record AudioAnalysisLookup(AudioAnalysisRow? Row, bool Pending);
+
+/// <summary>
+/// Serves measurements from the caches and queues the files it does not have.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -24,18 +31,25 @@ public sealed record SoundBoundsLookup(SoundBoundsRow? Row, bool Pending);
 /// a first sync of a big playlist does not turn the server into a transcoder farm.
 /// </para>
 /// <para>
-/// The cache is keyed by the file's modification time. A replaced file re-measures; a
+/// One queue serves both endpoints. A file asked about for its sound bounds is decoded
+/// once and its loudness and tempo fall out of the same pass, so whichever endpoint is
+/// asked first pays for the other. That is the whole reason these live together.
+/// </para>
+/// <para>
+/// The caches are keyed by the file's modification time. A replaced file re-measures; a
 /// file whose measurement failed is not retried until it changes, so one broken file
 /// cannot cost a decode on every request.
 /// </para>
 /// </remarks>
-public sealed class SoundBoundsService : IDisposable
+public sealed class AudioAnalysisService : IDisposable
 {
     private const string ServerSource = "server";
+    private const string ClientSource = "client";
 
-    private readonly SoundBoundsRepository _repository;
-    private readonly ISoundBoundsMeasurer _measurer;
-    private readonly ILogger<SoundBoundsService> _logger;
+    private readonly SoundBoundsRepository _bounds;
+    private readonly AudioAnalysisRepository _analysis;
+    private readonly IAudioMeasurer _measurer;
+    private readonly ILogger<AudioAnalysisService> _logger;
     private readonly int _concurrency;
     private readonly Channel<Job> _queue = Channel.CreateUnbounded<Job>();
     private readonly ConcurrentDictionary<string, byte> _inFlight = new(StringComparer.OrdinalIgnoreCase);
@@ -44,19 +58,22 @@ public sealed class SoundBoundsService : IDisposable
     private Task? _worker;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="SoundBoundsService"/> class.
+    /// Initializes a new instance of the <see cref="AudioAnalysisService"/> class.
     /// </summary>
-    /// <param name="repository">The cache.</param>
+    /// <param name="bounds">The sound-bounds cache.</param>
+    /// <param name="analysis">The loudness and tempo cache.</param>
     /// <param name="measurer">What actually decodes a file.</param>
     /// <param name="logger">Logger.</param>
     /// <param name="concurrency">How many files may decode at once.</param>
-    public SoundBoundsService(
-        SoundBoundsRepository repository,
-        ISoundBoundsMeasurer measurer,
-        ILogger<SoundBoundsService> logger,
+    public AudioAnalysisService(
+        SoundBoundsRepository bounds,
+        AudioAnalysisRepository analysis,
+        IAudioMeasurer measurer,
+        ILogger<AudioAnalysisService> logger,
         int concurrency = 1)
     {
-        _repository = repository;
+        _bounds = bounds;
+        _analysis = analysis;
         _measurer = measurer;
         _logger = logger;
         _concurrency = Math.Max(1, concurrency);
@@ -68,7 +85,7 @@ public sealed class SoundBoundsService : IDisposable
     public int InFlight => _inFlight.Count;
 
     /// <summary>
-    /// Looks up several files, queuing any that need measuring.
+    /// Looks up sound bounds for several files, queuing any that need measuring.
     /// </summary>
     /// <param name="files">Id and current path of each file.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -79,31 +96,36 @@ public sealed class SoundBoundsService : IDisposable
     {
         ArgumentNullException.ThrowIfNull(files);
 
-        var cached = await _repository.GetManyAsync(files.Select(f => f.Id).ToList(), cancellationToken)
+        var cached = await _bounds.GetManyAsync(files.Select(f => f.Id).ToList(), cancellationToken)
             .ConfigureAwait(false);
-        var result = new Dictionary<string, SoundBoundsLookup>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var (id, path) in files)
-        {
-            var mtime = Mtime(path);
-            if (mtime is null)
-            {
-                // No file to measure. Not pending — it would never resolve.
-                result[id] = new SoundBoundsLookup(null, false);
-                continue;
-            }
+        return Resolve(
+            files,
+            id => cached.TryGetValue(id, out var row) ? row : null,
+            row => row.MtimeTicks,
+            (row, pending) => new SoundBoundsLookup(row, pending));
+    }
 
-            if (cached.TryGetValue(id, out var row) && row.MtimeTicks == mtime)
-            {
-                result[id] = new SoundBoundsLookup(row, false);
-                continue;
-            }
+    /// <summary>
+    /// Looks up loudness and tempo for several files, queuing any that need measuring.
+    /// </summary>
+    /// <param name="files">Id and current path of each file.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A lookup per id.</returns>
+    public async Task<Dictionary<string, AudioAnalysisLookup>> LookupAnalysisAsync(
+        IReadOnlyList<(string Id, string Path)> files,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(files);
 
-            Enqueue(id, path, mtime.Value);
-            result[id] = new SoundBoundsLookup(null, true);
-        }
+        var cached = await _analysis.GetManyAsync(files.Select(f => f.Id).ToList(), cancellationToken)
+            .ConfigureAwait(false);
 
-        return result;
+        return Resolve(
+            files,
+            id => cached.TryGetValue(id, out var row) ? row : null,
+            row => row.MtimeTicks,
+            (row, pending) => new AudioAnalysisLookup(row, pending));
     }
 
     /// <summary>
@@ -126,7 +148,7 @@ public sealed class SoundBoundsService : IDisposable
     }
 
     /// <summary>
-    /// Stores a measurement a client made itself, so it can be served without decoding.
+    /// Stores sound bounds a client measured itself, so they can be served without decoding.
     /// </summary>
     /// <param name="id">The item.</param>
     /// <param name="path">Its file, for the modification time the row is keyed on.</param>
@@ -145,8 +167,36 @@ public sealed class SoundBoundsService : IDisposable
             return false;
         }
 
-        await _repository.UpsertAsync(
-            new SoundBoundsRow(id, mtime.Value, bounds, "client", null, Now()),
+        await _bounds.UpsertAsync(
+            new SoundBoundsRow(id, mtime.Value, bounds, ClientSource, null, Now()),
+            cancellationToken).ConfigureAwait(false);
+        return true;
+    }
+
+    /// <summary>
+    /// Stores loudness and tempo a client measured itself.
+    /// </summary>
+    /// <param name="id">The item.</param>
+    /// <param name="path">Its file, for the modification time the row is keyed on.</param>
+    /// <param name="loudness">The client's loudness, or null.</param>
+    /// <param name="tempo">The client's tempo, or null.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>True if stored; false when there is no file to key on.</returns>
+    public async Task<bool> StoreClientAnalysisAsync(
+        string id,
+        string path,
+        Loudness? loudness,
+        Tempo? tempo,
+        CancellationToken cancellationToken)
+    {
+        var mtime = Mtime(path);
+        if (mtime is null)
+        {
+            return false;
+        }
+
+        await _analysis.UpsertAsync(
+            new AudioAnalysisRow(id, mtime.Value, loudness, tempo, ClientSource, null, Now()),
             cancellationToken).ConfigureAwait(false);
         return true;
     }
@@ -185,6 +235,42 @@ public sealed class SoundBoundsService : IDisposable
     }
 
     private static long Now() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+    /// <summary>
+    /// Decides, for each file, whether its cached row is current, missing, or stale, and
+    /// queues a decode for the ones that are not current.
+    /// </summary>
+    private Dictionary<string, TLookup> Resolve<TRow, TLookup>(
+        IReadOnlyList<(string Id, string Path)> files,
+        Func<string, TRow?> cached,
+        Func<TRow, long> mtimeOf,
+        Func<TRow?, bool, TLookup> lookup)
+        where TRow : class
+    {
+        var result = new Dictionary<string, TLookup>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (id, path) in files)
+        {
+            var mtime = Mtime(path);
+            if (mtime is null)
+            {
+                // No file to measure. Not pending — it would never resolve.
+                result[id] = lookup(null, false);
+                continue;
+            }
+
+            if (cached(id) is { } row && mtimeOf(row) == mtime)
+            {
+                result[id] = lookup(row, false);
+                continue;
+            }
+
+            Enqueue(id, path, mtime.Value);
+            result[id] = lookup(null, true);
+        }
+
+        return result;
+    }
 
     private void EnsureWorker()
     {
@@ -233,11 +319,11 @@ public sealed class SoundBoundsService : IDisposable
     {
         try
         {
-            SoundBounds? bounds = null;
+            AudioMeasurement? measurement = null;
             string? error = null;
             try
             {
-                bounds = await _measurer.MeasureAsync(job.Path, _stopping.Token).ConfigureAwait(false);
+                measurement = await _measurer.MeasureAsync(job.Path, _stopping.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (_stopping.IsCancellationRequested)
             {
@@ -246,18 +332,33 @@ public sealed class SoundBoundsService : IDisposable
             catch (Exception ex)
             {
                 error = ex.Message;
-                _logger.LogWarning(ex, "Could not measure sound bounds for {Path}", job.Path);
+                _logger.LogWarning(ex, "Could not measure {Path}", job.Path);
             }
 
+            // Both caches are written from the one decode, whichever endpoint asked for
+            // it. A row a client had posted for itself is replaced by the server's own
+            // measurement, which is the same algorithm over the same file.
+            //
             // Keyed on the mtime seen when the job was queued: if the file changed while
             // decoding, the next lookup sees a mismatch and measures again.
-            await _repository.UpsertAsync(
-                new SoundBoundsRow(job.Id, job.MtimeTicks, bounds, ServerSource, error, Now()),
+            await _bounds.UpsertAsync(
+                new SoundBoundsRow(job.Id, job.MtimeTicks, measurement?.Bounds, ServerSource, error, Now()),
+                CancellationToken.None).ConfigureAwait(false);
+
+            await _analysis.UpsertAsync(
+                new AudioAnalysisRow(
+                    job.Id,
+                    job.MtimeTicks,
+                    measurement?.Loudness,
+                    measurement?.Tempo,
+                    ServerSource,
+                    error,
+                    Now()),
                 CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to store sound bounds for {Id}", job.Id);
+            _logger.LogError(ex, "Failed to store measurements for {Id}", job.Id);
         }
         finally
         {

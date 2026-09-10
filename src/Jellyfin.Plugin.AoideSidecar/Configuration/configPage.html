@@ -66,16 +66,16 @@
                 <div class="checkboxContainer checkboxContainer-withDescription">
                     <label class="emby-checkbox-label">
                         <input id="EnableSoundBoundsSweep" name="EnableSoundBoundsSweep" type="checkbox" is="emby-checkbox" />
-                        <span>Measure sound bounds for the whole library nightly</span>
+                        <span>Analyse the whole library nightly</span>
                     </label>
                     <div class="fieldDescription checkboxFieldDescription">
-                        Off by default. Decodes every track once so clients can trim silence; hours of CPU on a large library.
-                        Tracks are measured on request either way.
+                        Off by default. Decodes every track once to measure silence, loudness and tempo together; hours of
+                        CPU on a large library. Tracks are measured on request either way.
                     </div>
                 </div>
 
                 <div class="inputContainer">
-                    <label class="inputLabel inputLabelUnfocused" for="SoundBoundsConcurrency">Sound-bounds decodes at once</label>
+                    <label class="inputLabel inputLabelUnfocused" for="SoundBoundsConcurrency">Decodes at once</label>
                     <input id="SoundBoundsConcurrency" name="SoundBoundsConcurrency" type="number" is="emby-input" min="1" max="8" />
                 </div>
 

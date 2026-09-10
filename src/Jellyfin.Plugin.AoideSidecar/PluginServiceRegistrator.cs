@@ -40,15 +40,17 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<MediaBrowser.Model.Tasks.IScheduledTask, Export.PlaylistExportTask>();
 
         serviceCollection.AddSingleton<SoundBoundsRepository>();
-        serviceCollection.AddSingleton<Sound.ISoundBoundsMeasurer>(provider => new Sound.FfmpegSoundBoundsMeasurer(
+        serviceCollection.AddSingleton<AudioAnalysisRepository>();
+        serviceCollection.AddSingleton<Sound.IAudioMeasurer>(provider => new Sound.FfmpegAudioMeasurer(
             provider.GetRequiredService<MediaBrowser.Controller.MediaEncoding.IMediaEncoder>(),
-            provider.GetRequiredService<ILogger<Sound.FfmpegSoundBoundsMeasurer>>(),
+            provider.GetRequiredService<ILogger<Sound.FfmpegAudioMeasurer>>(),
             TimeSpan.FromSeconds(Math.Max(10, Plugin.Instance?.Configuration.SoundBoundsTimeoutSeconds ?? 180))));
-        serviceCollection.AddSingleton(provider => new Sound.SoundBoundsService(
+        serviceCollection.AddSingleton(provider => new Sound.AudioAnalysisService(
             provider.GetRequiredService<SoundBoundsRepository>(),
-            provider.GetRequiredService<Sound.ISoundBoundsMeasurer>(),
-            provider.GetRequiredService<ILogger<Sound.SoundBoundsService>>(),
+            provider.GetRequiredService<AudioAnalysisRepository>(),
+            provider.GetRequiredService<Sound.IAudioMeasurer>(),
+            provider.GetRequiredService<ILogger<Sound.AudioAnalysisService>>(),
             Plugin.Instance?.Configuration.SoundBoundsConcurrency ?? 1));
-        serviceCollection.AddSingleton<MediaBrowser.Model.Tasks.IScheduledTask, Sound.SoundBoundsSweepTask>();
+        serviceCollection.AddSingleton<MediaBrowser.Model.Tasks.IScheduledTask, Sound.AudioAnalysisSweepTask>();
     }
 }

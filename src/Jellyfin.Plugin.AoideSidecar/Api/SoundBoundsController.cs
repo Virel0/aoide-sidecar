@@ -1,8 +1,6 @@
-using System.Globalization;
 using System.Net.Mime;
 using System.Text.Json.Serialization;
 using Jellyfin.Plugin.AoideSidecar.Sound;
-using MediaBrowser.Controller.Entities.Audio;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Net;
 using Microsoft.AspNetCore.Authorization;
@@ -54,7 +52,7 @@ public class SoundBoundsController : ControllerBase
 {
     private const int MaxIds = 200;
 
-    private readonly SoundBoundsService _service;
+    private readonly AudioAnalysisService _service;
     private readonly ILibraryManager _libraryManager;
     private readonly IUserManager _userManager;
     private readonly IAuthorizationContext _authorizationContext;
@@ -67,7 +65,7 @@ public class SoundBoundsController : ControllerBase
     /// <param name="userManager">Jellyfin's users, for visibility checks.</param>
     /// <param name="authorizationContext">Jellyfin's request authorization context.</param>
     public SoundBoundsController(
-        SoundBoundsService service,
+        AudioAnalysisService service,
         ILibraryManager libraryManager,
         IUserManager userManager,
         IAuthorizationContext authorizationContext)
@@ -120,7 +118,7 @@ public class SoundBoundsController : ControllerBase
         var files = new List<(string Id, string Path)>();
         foreach (var id in requested)
         {
-            if (Resolve(id, user) is { } file)
+            if (AudioItems.Resolve(_libraryManager, id, user) is { } file)
             {
                 files.Add(file);
             }
@@ -195,7 +193,7 @@ public class SoundBoundsController : ControllerBase
                 });
             }
 
-            if (Resolve(id, user) is { } file)
+            if (AudioItems.Resolve(_libraryManager, id, user) is { } file)
             {
                 await _service
                     .StoreClientMeasurementAsync(
@@ -208,40 +206,5 @@ public class SoundBoundsController : ControllerBase
         }
 
         return NoContent();
-    }
-
-    /// <summary>
-    /// Turns a client-supplied id into a visible audio file, or nothing.
-    /// </summary>
-    /// <remarks>
-    /// Nothing here may throw. An unknown id is omitted from the answer, not an error —
-    /// and Jellyfin's <c>GetItemById</c> throws on an empty GUID, so without the guard one
-    /// malformed id in a request of two hundred would fail all of them.
-    /// </remarks>
-    private (string Id, string Path)? Resolve(string id, object? user)
-    {
-        if (!Guid.TryParse(id, out var guid) || guid == Guid.Empty)
-        {
-            return null;
-        }
-
-        try
-        {
-            if (_libraryManager.GetItemById(guid) is not Audio audio || string.IsNullOrEmpty(audio.Path))
-            {
-                return null;
-            }
-
-            if (user is Jellyfin.Database.Implementations.Entities.User jellyfinUser && !audio.IsVisible(jellyfinUser))
-            {
-                return null;
-            }
-
-            return (guid.ToString("N", CultureInfo.InvariantCulture), audio.Path);
-        }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
-        {
-            return null;
-        }
     }
 }
