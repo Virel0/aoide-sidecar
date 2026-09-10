@@ -13,23 +13,42 @@ namespace Jellyfin.Plugin.AoideSidecar.Api;
 /// One file's loudness and tempo on the wire. Every field is independently nullable: a
 /// track can have a loudness and no usable tempo.
 /// </summary>
+/// <remarks>
+/// Every property is written even when null. Jellyfin configures MVC's serialiser to drop
+/// nulls, which would have quietly turned a documented <c>"bpm": null</c> into no <c>bpm</c>
+/// key at all — the same class of mistake as the PascalCase responses this project shipped
+/// once already. Both readings are equivalent to a lenient decoder and the contract says
+/// the field is there, so the field is there.
+/// </remarks>
 public class AudioAnalysisDto
 {
     /// <summary>Gets or sets EBU R128 integrated loudness over the whole track, in LUFS.</summary>
     [JsonPropertyName("loudnessLufs")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     public double? LoudnessLufs { get; set; }
 
     /// <summary>Gets or sets true peak, in dBFS.</summary>
     [JsonPropertyName("truePeakDbfs")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     public double? TruePeakDbfs { get; set; }
 
     /// <summary>Gets or sets beats per minute.</summary>
     [JsonPropertyName("bpm")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     public double? Bpm { get; set; }
 
     /// <summary>Gets or sets how much the tempo is worth believing, zero to one.</summary>
     [JsonPropertyName("bpmConfidence")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     public double? BpmConfidence { get; set; }
+
+    /// <summary>
+    /// Gets or sets how much of the track keeps that tempo, zero to one, or null when the
+    /// track was too short to tell. One means a fixed grid would fit the whole thing.
+    /// </summary>
+    [JsonPropertyName("bpmStability")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public double? BpmStability { get; set; }
 
     /// <summary>Gets a value indicating whether there is anything here worth sending.</summary>
     [JsonIgnore]
@@ -200,7 +219,7 @@ public class AudioAnalysisController : ControllerBase
             return StatusCode(StatusCodes.Status400BadRequest, new ProblemDetails
             {
                 Title = "Malformed body",
-                Detail = $"Send {{ analysis: {{ id: {{ loudnessLufs, truePeakDbfs, bpm, bpmConfidence }} | null }} }} "
+                Detail = $"Send {{ analysis: {{ id: {{ loudnessLufs, truePeakDbfs, bpm, bpmConfidence, bpmStability }} | null }} }} "
                        + $"with at most {MaxIds} ids.",
                 Status = StatusCodes.Status400BadRequest
             });
@@ -226,7 +245,7 @@ public class AudioAnalysisController : ControllerBase
                     : null;
 
                 // A client that knows a tempo but not how sure it is is taken at its word.
-                var tempo = dto?.Bpm is { } bpm ? new Tempo(bpm, dto.BpmConfidence ?? 1) : null;
+                var tempo = dto?.Bpm is { } bpm ? new Tempo(bpm, dto.BpmConfidence ?? 1, dto.BpmStability) : null;
 
                 await _service
                     .StoreClientAnalysisAsync(file.Id, file.Path, loudness, tempo, cancellationToken)
@@ -253,6 +272,7 @@ public class AudioAnalysisController : ControllerBase
         {
             dto.Bpm = tempo.Bpm;
             dto.BpmConfidence = tempo.Confidence;
+            dto.BpmStability = tempo.Stability;
         }
 
         return dto;
@@ -291,6 +311,11 @@ public class AudioAnalysisController : ControllerBase
         if (dto.BpmConfidence is { } confidence && (!double.IsFinite(confidence) || confidence < 0 || confidence > 1))
         {
             return "bpmConfidence must be between 0 and 1.";
+        }
+
+        if (dto.BpmStability is { } stability && (!double.IsFinite(stability) || stability < 0 || stability > 1))
+        {
+            return "bpmStability must be between 0 and 1.";
         }
 
         return null;

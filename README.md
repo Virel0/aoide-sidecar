@@ -30,6 +30,7 @@ SQLite. Offline is not a degraded mode; it is the normal mode that sometimes als
 | Match an imported track list against the library | `POST /aoide/match` | 1.8.0.0 |
 | Where each track's sound starts and stops | `GET`/`POST /aoide/sound-bounds` | 1.10.0.0 |
 | How loud each track is and how fast | `GET`/`POST /aoide/audio-analysis` | 1.11.0.0 |
+| Whether a track keeps its tempo | `bpmStability` on the same endpoint | 1.12.0.0 |
 
 Two scheduled tasks exist and both are **off by default**, switchable on the plugin's
 configuration page: a nightly playlist export, and a library-wide analysis sweep (hours
@@ -142,10 +143,13 @@ trace.
 - **A file is decoded once for all of it.** Sound bounds, loudness and tempo come out of
   a single ffmpeg pass, so asking for any one of them fills the cache for the others.
 - **Tempo is an estimate and says so.** Loudness is ffmpeg's own R128 measurement and is
-  exact. Tempo is envelope autocorrelation in managed code — accurate to about a beat per
-  minute on music with a beat, silent on music without one, and prone to reporting half or
-  double. Every answer carries a confidence, and anything under 0.5 is not reported at
-  all. Good enough to order a mix by; not good enough to beat-match on.
+  exact. Tempo is multi-band spectral flux autocorrelated in managed code — within
+  0.2 BPM across 62 to 198 on synthesised beats, silent on music without a beat, and still
+  liable to report half or double on real music. Every answer carries a confidence, and
+  anything under 0.5 is not reported at all.
+- **A tempo is not a beat grid.** There is no phase: the server says how far apart the
+  beats are, never where they fall. `bpmStability` says whether a fixed grid would fit at
+  all, which for anything played by people it usually would not.
 - **One server process.** The store is SQLite in WAL mode; it is not designed for
   several Jellyfin instances sharing one database.
 

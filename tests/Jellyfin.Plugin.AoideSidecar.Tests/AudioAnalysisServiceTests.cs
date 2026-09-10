@@ -160,14 +160,14 @@ public sealed class AudioAnalysisServiceTests : IDisposable
     public async Task A_client_analysis_is_served_without_decoding()
     {
         Assert.True(await _service.StoreClientAnalysisAsync(
-            "t1", _file, new Loudness(-9.7, -0.3), new Tempo(128, 0.8), default));
+            "t1", _file, new Loudness(-9.7, -0.3), new Tempo(128, 0.8, 0.7), default));
 
         var lookup = (await _service.LookupAnalysisAsync(new[] { ("t1", _file) }, default))["t1"];
 
         Assert.False(lookup.Pending);
         Assert.Equal("client", lookup.Row!.Source);
         Assert.Equal(new Loudness(-9.7, -0.3), lookup.Row.Loudness);
-        Assert.Equal(new Tempo(128, 0.8), lookup.Row.Tempo);
+        Assert.Equal(new Tempo(128, 0.8, 0.7), lookup.Row.Tempo);
         Assert.Equal(0, _measurer.Calls);
     }
 
@@ -181,7 +181,7 @@ public sealed class AudioAnalysisServiceTests : IDisposable
         _measurer.Result = new AudioMeasurement(
             new SoundBounds(1940, 5200),
             new Loudness(-9.7, -0.3),
-            new Tempo(128, 0.82));
+            new Tempo(128, 0.82, 1.0));
 
         await _service.LookupAsync(new[] { ("t1", _file) }, default);
         await _service.DrainAsync(default);
@@ -190,7 +190,7 @@ public sealed class AudioAnalysisServiceTests : IDisposable
 
         Assert.False(analysis.Pending);
         Assert.Equal(new Loudness(-9.7, -0.3), analysis.Row!.Loudness);
-        Assert.Equal(new Tempo(128, 0.82), analysis.Row.Tempo);
+        Assert.Equal(new Tempo(128, 0.82, 1.0), analysis.Row.Tempo);
         Assert.Equal(1, _measurer.Calls);
     }
 
@@ -204,7 +204,7 @@ public sealed class AudioAnalysisServiceTests : IDisposable
         _measurer.Result = new AudioMeasurement(
             new SoundBounds(1940, 5200),
             new Loudness(-9.7, -0.3),
-            new Tempo(128, 0.82));
+            new Tempo(128, 0.82, 1.0));
 
         await _service.LookupAnalysisAsync(new[] { ("t1", _file) }, default);
         await _service.DrainAsync(default);

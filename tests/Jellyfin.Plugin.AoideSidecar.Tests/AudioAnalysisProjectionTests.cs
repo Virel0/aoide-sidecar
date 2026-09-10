@@ -12,14 +12,42 @@ namespace Jellyfin.Plugin.AoideSidecar.Tests;
 public sealed class AudioAnalysisProjectionTests
 {
     [Fact]
-    public void A_confident_tempo_is_reported_with_its_confidence()
+    public void A_confident_tempo_is_reported_with_its_confidence_and_stability()
     {
-        var dto = AudioAnalysisController.Project(Row(new Loudness(-9.7, -0.3), new Tempo(128, 0.82)));
+        var dto = AudioAnalysisController.Project(Row(new Loudness(-9.7, -0.3), new Tempo(128, 0.82, 1.0)));
 
         Assert.Equal(-9.7, dto.LoudnessLufs);
         Assert.Equal(-0.3, dto.TruePeakDbfs);
         Assert.Equal(128, dto.Bpm);
         Assert.Equal(0.82, dto.BpmConfidence);
+        Assert.Equal(1.0, dto.BpmStability);
+        Assert.False(dto.IsEmpty);
+    }
+
+    /// <summary>
+    /// Stability rides with the tempo. Withheld tempo, withheld stability — it describes a
+    /// number the client is not being given.
+    /// </summary>
+    [Fact]
+    public void Stability_is_withheld_along_with_the_tempo_it_describes()
+    {
+        var dto = AudioAnalysisController.Project(Row(null, new Tempo(96, 0.31, 0.9)));
+
+        Assert.Null(dto.Bpm);
+        Assert.Null(dto.BpmStability);
+    }
+
+    /// <summary>
+    /// A track too short to compare windows across still has a tempo; it just has no
+    /// answer to whether the tempo holds.
+    /// </summary>
+    [Fact]
+    public void A_tempo_with_no_stability_is_still_reported()
+    {
+        var dto = AudioAnalysisController.Project(Row(null, new Tempo(128, 0.9)));
+
+        Assert.Equal(128, dto.Bpm);
+        Assert.Null(dto.BpmStability);
         Assert.False(dto.IsEmpty);
     }
 
@@ -30,7 +58,7 @@ public sealed class AudioAnalysisProjectionTests
     [Fact]
     public void An_unsure_tempo_is_not_reported_but_the_loudness_still_is()
     {
-        var dto = AudioAnalysisController.Project(Row(new Loudness(-14.2, -1.1), new Tempo(96, 0.31)));
+        var dto = AudioAnalysisController.Project(Row(new Loudness(-14.2, -1.1), new Tempo(96, 0.31, 0.8)));
 
         Assert.Equal(-14.2, dto.LoudnessLufs);
         Assert.Null(dto.Bpm);
@@ -41,7 +69,7 @@ public sealed class AudioAnalysisProjectionTests
     [Fact]
     public void A_tempo_without_a_loudness_is_reported_on_its_own()
     {
-        var dto = AudioAnalysisController.Project(Row(null, new Tempo(174, 0.9)));
+        var dto = AudioAnalysisController.Project(Row(null, new Tempo(174, 0.9, 0.95)));
 
         Assert.Null(dto.LoudnessLufs);
         Assert.Equal(174, dto.Bpm);

@@ -23,7 +23,7 @@ namespace Jellyfin.Plugin.AoideSidecar.Data;
 /// </remarks>
 public sealed class SyncDatabase
 {
-    private const int CurrentSchemaVersion = 6;
+    private const int CurrentSchemaVersion = 7;
 
     private static readonly string[] Migrations =
     {
@@ -177,6 +177,27 @@ public sealed class SyncDatabase
             error          TEXT,
             measured_at    INTEGER NOT NULL
         );
+        """,
+
+        // v7 — how much of a track keeps the tempo the whole track averaged out to.
+        //
+        // A confident tempo says the onsets are periodic on average. It does not say a
+        // fixed grid would fit, and for anything played by people it usually would not.
+        // Anything that wants to line two tracks up needs to know the difference, and
+        // nothing else the server stores answers it. Null where the track was too short
+        // to compare windows across.
+        //
+        // The server's own rows are dropped along with it. They hold tempi from an
+        // estimator this release replaces — broadband energy rather than per-band, and
+        // wrong by an octave at some tempi — and nothing would ever re-measure them: a row
+        // is refreshed when its file changes, and the files have not. Serving a superseded
+        // tempo beside a stability column it was never measured for is worse than serving
+        // nothing, so the rows go and the next request for one measures it again. Rows a
+        // client posted are left alone; they are not this estimator's to discard.
+        """
+        ALTER TABLE audio_analysis ADD COLUMN bpm_stability REAL;
+
+        DELETE FROM audio_analysis WHERE source = 'server';
         """
     };
 

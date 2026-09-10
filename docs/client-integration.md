@@ -668,17 +668,21 @@ it is streaming, and that nobody wants to compute on a phone for a library of th
 
 ```
 GET  /aoide/audio-analysis?ids=<jellyfinId>,…      (≤ 200)
-POST /aoide/audio-analysis  { analysis: { id: { loudnessLufs, truePeakDbfs, bpm, bpmConfidence } | null } }
+POST /aoide/audio-analysis  { analysis: { id: { loudnessLufs, truePeakDbfs, bpm, bpmConfidence, bpmStability } | null } }
 ```
 
 ```json
 { "analysis": { "3b1c…": { "loudnessLufs": -9.7, "truePeakDbfs": -0.3,
-                           "bpm": 128.0, "bpmConfidence": 0.82 },
+                           "bpm": 127.97, "bpmConfidence": 1.0, "bpmStability": 1.0 },
                 "a71f…": { "loudnessLufs": -14.2, "truePeakDbfs": -1.1,
-                           "bpm": null, "bpmConfidence": null },
+                           "bpm": null, "bpmConfidence": null, "bpmStability": null },
                 "c904…": null },
   "pending": ["9c0e…"] }
 ```
+
+Every field inside an entry is always present, `null` included — the server pins that
+rather than leaving it to Jellyfin's serialiser, which drops nulls by default.
+`bpmStability` was added in 1.12.0.0 and is absent from servers older than that.
 
 `pending`, `null` and a missing id mean exactly what they mean for sound bounds: queued,
 measured with nothing to report, and unknown-or-invisible. Every field is independently
@@ -709,39 +713,66 @@ do not.
 
 ### Tempo
 
-`bpm` is beats per minute and `bpmConfidence` is between 0 and 1. **A tempo the server is
-not at least 0.5 confident of is not sent at all** — you will see `bpm: null` with a
-loudness beside it. That is deliberate: ambient, spoken word and rubato classical have no
-single tempo, and a made-up 128 would be sorted against as though it were true.
+`bpm` is beats per minute, `bpmConfidence` is between 0 and 1, and `bpmStability` says
+how much of the track actually keeps that tempo. **A tempo the server is not at least 0.5
+confident of is not sent at all** — you will see `bpm: null` with a loudness beside it.
+That is deliberate: ambient, spoken word and rubato classical have no single tempo, and a
+made-up 128 would be sorted against as though it were true. `bpmStability` rides with the
+tempo, so it is null whenever `bpm` is.
 
 `aubio` and Essentia were both suggested and neither is available: Jellyfin ships ffmpeg
 and nothing else, and the sidecar is a single managed DLL that Jellyfin's own installer
 drops into place. Requiring a server admin to install a native library before a plugin
-works is out of all proportion to two numbers used for ordering. So the estimate is the
-classic envelope autocorrelation — energy per 10 ms of a Hann-windowed span, log
-compressed, differenced into an onset strength, autocorrelated over the lags that
-correspond to 60–200 BPM.
+works is out of all proportion to two numbers used for ordering. So the estimate is
+written out: the spectrum of each 23 ms window is folded into log-spaced bands, each
+band's rise since the previous hop is added up into an onset strength, and that is
+autocorrelated over the lags corresponding to 60–200 BPM.
 
-What that means in practice:
+Bands rather than total energy, because most of what carries a beat does not make a track
+louder — a hi-hat over a sustained pad, a snare under a bass note. Watching the total,
+those events are invisible; watching each band, they are unmistakable.
 
-- **It is good on anything with a beat and honest about everything else.** Synthesised
-  beats at 90 through 170 BPM come back within about a beat per minute, at full
-  confidence. A held tone, silence, noise, and anything under ten seconds come back with
-  no tempo at all.
-- **Half and double are the failure mode.** An envelope that repeats every beat also
-  repeats every two beats, and correlates equally well with both. A preference for tempi
-  near 120, and a rule that takes the shorter period when it explains the envelope just as
-  well, settle it in the ordinary case — but a track reported at 85 that you would call
-  170 is the shape of the mistake to expect.
-- **Do not beat-match on it yet.** It is precise enough to order a mix by and not
-  precise enough to align a transition to. That was the agreed sequencing anyway.
+**Accuracy.** Across synthesised beats from 62 to 198 BPM the estimate lands within
+**0.2 BPM**, with no octave errors anywhere in the range. Half and double are still the
+failure mode to expect on real music — an envelope that repeats every beat repeats every
+two beats and correlates equally well with both — but the cases that used to break
+outright do not any more.
+
+**What that is and is not good enough for.** It orders a mix properly. It is not a beat
+grid: there is no phase, so nothing tells you where the beats fall, only how far apart
+they are. See `bpmStability` below before assuming a fixed grid would fit at all.
+
+### `bpmStability`
+
+The tempo is measured again over overlapping twenty-second windows and compared with the
+whole-track answer. `bpmStability` is the fraction of windows that agreed to within half a
+per cent, with half and double counted as agreeing — they are the same grid read at a
+different resolution.
+
+| value | what it means |
+| ----- | ------------- |
+| `1.0` | Every window agreed. A fixed grid fits, as far as twenty seconds of audio can tell. |
+| `0.3`–`0.6` | The tempo moves. A drift of a few per cent across the track, which is what a performance does. |
+| `0.0`–`0.2` | No fixed tempo worth the name, whatever the headline number says. |
+| `null` | Under about forty seconds of audio — fewer than three windows, and nothing to compare. |
+
+This is the number to check before lining two tracks up, and it is a separate question
+from confidence. A confident tempo says the onsets are periodic *on average*; a track that
+sped up from 105 to 145 still reports a confident 135, and its stability is 0.0. Measured
+against ramps: 120→121 reports 1.0, 120→122 reports 0.62, 120→125 reports 0.31, 105→145
+reports 0.0.
+
+Half a per cent is loose for gridding — it is what twenty seconds of audio can resolve,
+not what a grid needs. A tempo half a per cent out drifts most of a second across a
+three-minute track. Treat `1.0` as "nothing here rules a grid out", not as a guarantee.
 
 ### `POST` — a client sharing what it measured
 
 Optional, and the same shape as the response. `loudnessLufs` and `truePeakDbfs` go
-together: send both or neither. `bpm` without a `bpmConfidence` is taken at face value.
-A posted tempo is stored at whatever confidence it carries and filtered on the way out
-like any other, so posting one below 0.5 stores it and serves nothing.
+together: send both or neither. `bpm` without a `bpmConfidence` is taken at face value,
+and `bpmStability` may be omitted. A posted tempo is stored at whatever confidence it
+carries and filtered on the way out like any other, so posting one below 0.5 stores it and
+serves nothing.
 
 ### Not a sync entity
 
