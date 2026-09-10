@@ -294,6 +294,39 @@ public sealed class AudioAnalysisServiceTests : IDisposable
     }
 
     /// <summary>
+    /// What the coverage endpoint counts. Measured and gridded are different numbers on
+    /// purpose: a recording decoded and found to have no beat is finished, and counting it
+    /// as outstanding would mean progress never reached the end.
+    /// </summary>
+    [Fact]
+    public async Task Measured_and_gridded_are_counted_separately()
+    {
+        var second = Path.Combine(_directory, "spoken.flac");
+        File.WriteAllText(second, "not really audio either");
+
+        _measurer.Result = new AudioMeasurement(
+            null,
+            null,
+            new Tempo(128, 1.0, 1.0),
+            new BeatGrid(new[] { new BeatSegment(0, 60000, 0, 128, 4, 128) }, 4, 0, 0, 60000),
+            null);
+        await _service.LookupGridAsync(new[] { ("t1", _file) }, default);
+        await _service.DrainAsync(default);
+
+        // Decoded, and there was no beat in it.
+        _measurer.Result = new AudioMeasurement(null, null, null, null, null);
+        await _service.LookupGridAsync(new[] { ("t2", second) }, default);
+        await _service.DrainAsync(default);
+
+        var (measured, gridded) = await _grids.CountAsync(default);
+
+        Assert.Equal(2, measured);
+        Assert.Equal(1, gridded);
+        Assert.Equal(2, await _analysis.CountAsync(default));
+        Assert.Equal(2, await _bounds.CountAsync(default));
+    }
+
+    /// <summary>
     /// A tempo too weak to report is still stored, so the threshold can be reconsidered
     /// without decoding the library again.
     /// </summary>

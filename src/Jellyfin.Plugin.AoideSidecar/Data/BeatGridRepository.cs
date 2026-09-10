@@ -116,6 +116,27 @@ public sealed class BeatGridRepository
     }
 
     /// <summary>
+    /// How many files have been measured, and how many of those actually got a grid.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Files measured, and files with a usable grid.</returns>
+    /// <remarks>
+    /// The two differ on purpose. A spoken-word recording that has been decoded and found
+    /// to have no beat is finished, not outstanding, and a progress figure that counted it
+    /// as unmeasured would never reach the end.
+    /// </remarks>
+    public async Task<(long Measured, long Gridded)> CountAsync(CancellationToken cancellationToken)
+    {
+        await using var connection = await _database.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*), COUNT(segments) FROM beat_grids;";
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        return await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
+            ? (reader.GetInt64(0), reader.GetInt64(1))
+            : (0, 0);
+    }
+
+    /// <summary>
     /// Stores a measurement, replacing any earlier one.
     /// </summary>
     /// <param name="row">The row.</param>

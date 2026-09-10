@@ -781,6 +781,31 @@ the file itself, so there is no op log, no export, no retention rule and nothing
 resolve between devices. Do not push them as ops — `audio_analysis` is not an accepted
 entity and never will be.
 
+## How much has been measured
+
+Added in 1.14.0.0. Measurement is lazy — a track is decoded the first time something asks
+about it — so nothing else here answers "how far along is it".
+
+```
+GET /aoide/analysis/coverage
+```
+
+```json
+{ "tracks": 4210, "soundBounds": 4198, "audioAnalysis": 4198, "beatGrids": 4198,
+  "gridded": 3806, "measuring": 1, "sweepEnabled": false,
+  "summary": "4198 of 4210 tracks measured (100%), 3806 with a beat grid. Nothing outstanding." }
+```
+
+- **`beatGrids`** is how many have been decoded; **`gridded`** is how many of those came
+  out with a grid. The difference is not a backlog — a spoken-word recording decoded and
+  found to have no beat is finished. A progress bar wants `beatGrids` against `tracks`.
+- **`measuring`** is what is queued or decoding at this instant. Zero with work
+  outstanding means nothing is asking, not that anything is stuck.
+- **`summary`** says the same thing in a sentence, for a person reading the response.
+
+`tracks` is every audio item in the library; the caches are global rather than per user, so
+the counts are too.
+
 ## Beat grid
 
 Added in 1.13.0.0. Where the beats actually fall, which is a different measurement from

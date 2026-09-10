@@ -86,6 +86,19 @@ public sealed class SoundBoundsRepository
     }
 
     /// <summary>
+    /// How many files have a measurement stored.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The row count.</returns>
+    public async Task<long> CountAsync(CancellationToken cancellationToken)
+    {
+        await using var connection = await _database.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM sound_bounds;";
+        return Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false), System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
     /// Stores a measurement, replacing any earlier one.
     /// </summary>
     /// <param name="row">The row.</param>

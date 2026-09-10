@@ -32,6 +32,7 @@ SQLite. Offline is not a degraded mode; it is the normal mode that sometimes als
 | How loud each track is and how fast | `GET`/`POST /aoide/audio-analysis` | 1.11.0.0 |
 | Whether a track keeps its tempo | `bpmStability` on the same endpoint | 1.12.0.0 |
 | Where the beats fall, the meter, and where a mix may run | `GET /aoide/beat-grid` | 1.13.0.0 |
+| How much of the library has been measured | `GET /aoide/analysis/coverage` | 1.14.0.0 |
 
 Two scheduled tasks exist and both are **off by default**, switchable on the plugin's
 configuration page: a nightly playlist export, and a library-wide analysis sweep (hours
