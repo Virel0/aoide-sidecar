@@ -9,6 +9,14 @@
         "imageUrl": "",
         "versions": [
             {
+                "version": "1.13.0.0",
+                "changelog": "GET /aoide/beat-grid: where the beats actually fall. A fitted grid per segment \u2014 anchor, tempo, and the RMS residual that says whether a track can be locked to at all \u2014 plus the meter, the downbeat, the two points between which a blend may run, and the key. Same decode as sound bounds and audio analysis. On sequenced material the fit lands at 4 to 6 ms residual with the anchor within 6 ms of the true first beat; a track that drifts comes back in segments and says so. No POST: a client that could fit its own grid would not need the endpoint.",
+                "targetAbi": "10.11.0.0",
+                "sourceUrl": "https://github.com/Virel0/aoide-sidecar/releases/download/v1.13.0.0/aoide-sidecar_1.13.0.0.zip",
+                "checksum": "62d29c8291e19bd6be97abb68bc0a5f2",
+                "timestamp": "2026-09-10T19:11:28Z"
+            },
+            {
                 "version": "1.12.0.0",
                 "changelog": "Onsets are now multi-band spectral flux instead of broadband energy, and the correlation is read at fractional lags. Together with a padded lag search that takes the tempo estimate from about a beat per minute \u2014 with 185 BPM reading as 92 \u2014 to within 0.2 BPM across 62 to 198, with no octave errors in the range. New bpmStability field: the fraction of twenty-second windows whose tempo matched the whole track's, which is the question a beat grid turns on and the one confidence does not answer. Server-measured rows are dropped on migration so tempi are taken again with the new estimator; client-posted rows are kept. Null fields are now always written rather than omitted.",
                 "targetAbi": "10.11.0.0",
