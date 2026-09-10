@@ -9,6 +9,14 @@
         "imageUrl": "",
         "versions": [
             {
+                "version": "1.12.0.0",
+                "changelog": "Onsets are now multi-band spectral flux instead of broadband energy, and the correlation is read at fractional lags. Together with a padded lag search that takes the tempo estimate from about a beat per minute \u2014 with 185 BPM reading as 92 \u2014 to within 0.2 BPM across 62 to 198, with no octave errors in the range. New bpmStability field: the fraction of twenty-second windows whose tempo matched the whole track's, which is the question a beat grid turns on and the one confidence does not answer. Server-measured rows are dropped on migration so tempi are taken again with the new estimator; client-posted rows are kept. Null fields are now always written rather than omitted.",
+                "targetAbi": "10.11.0.0",
+                "sourceUrl": "https://github.com/Virel0/aoide-sidecar/releases/download/v1.12.0.0/aoide-sidecar_1.12.0.0.zip",
+                "checksum": "bcf977d4d2a843be1aa159e818937e02",
+                "timestamp": "2026-09-10T17:00:50Z"
+            },
+            {
                 "version": "1.11.0.0",
                 "changelog": "GET/POST /aoide/audio-analysis: EBU R128 loudness and true peak from ffmpeg's own loudnorm, plus a tempo with a confidence. Taken from the same decode as the sound bounds, so asking either endpoint about a file fills both caches. A tempo under 0.5 confidence is not reported. The nightly sweep now covers all three; its schedule and the configuration settings are unchanged.",
                 "targetAbi": "10.11.0.0",
