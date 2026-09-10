@@ -9,6 +9,14 @@
         "imageUrl": "",
         "versions": [
             {
+                "version": "1.11.0.0",
+                "changelog": "GET/POST /aoide/audio-analysis: EBU R128 loudness and true peak from ffmpeg's own loudnorm, plus a tempo with a confidence. Taken from the same decode as the sound bounds, so asking either endpoint about a file fills both caches. A tempo under 0.5 confidence is not reported. The nightly sweep now covers all three; its schedule and the configuration settings are unchanged.",
+                "targetAbi": "10.11.0.0",
+                "sourceUrl": "https://github.com/Virel0/aoide-sidecar/releases/download/v1.11.0.0/aoide-sidecar_1.11.0.0.zip",
+                "checksum": "7b3a3565e78ed67730f44db59c691632",
+                "timestamp": "2026-09-10T15:57:43Z"
+            },
+            {
                 "version": "1.10.0.0",
                 "changelog": "GET/POST /aoide/sound-bounds: where each track's sound starts and stops, measured with the phone's exact algorithm over ffmpeg-decoded PCM, lazily and cached by file mtime.",
                 "targetAbi": "10.11.0.0",
