@@ -71,37 +71,66 @@ public sealed class ArrangementRepository
         {
             id.Value = value;
             await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-            if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            if (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
-                continue;
+                var row = Read(reader);
+                rows[row.JellyfinId] = row;
             }
-
-            Arrangement? arrangement = null;
-            if (!reader.IsDBNull(2))
-            {
-                var sections = Read<List<Section>>(reader.GetString(2));
-                if (sections is { Count: > 0 })
-                {
-                    // A null vocals column is "could not tell", which is a different answer
-                    // from an empty list, so the distinction has to survive the round trip.
-                    arrangement = new Arrangement(
-                        sections,
-                        reader.IsDBNull(3) ? null : reader.GetInt32(3),
-                        reader.IsDBNull(4) ? null : reader.GetDouble(4),
-                        reader.IsDBNull(5) ? null : Read<List<VocalSpan>>(reader.GetString(5)));
-                }
-            }
-
-            rows[reader.GetString(0)] = new ArrangementRow(
-                reader.GetString(0),
-                reader.GetInt64(1),
-                arrangement,
-                reader.GetString(6),
-                reader.IsDBNull(7) ? null : reader.GetString(7),
-                reader.GetInt64(8));
         }
 
         return rows;
+    }
+
+    /// <summary>
+    /// Every row there is, for the ranking.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Rows keyed by id.</returns>
+    public async Task<Dictionary<string, ArrangementRow>> AllAsync(CancellationToken cancellationToken)
+    {
+        var rows = new Dictionary<string, ArrangementRow>(StringComparer.OrdinalIgnoreCase);
+        await using var connection = await _database.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT jellyfin_id, mtime_ticks, sections, phrase_bars, phrase_anchor_ms, vocals,
+                   source, error, measured_at
+            FROM arrangements;
+            """;
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            var row = Read(reader);
+            rows[row.JellyfinId] = row;
+        }
+
+        return rows;
+    }
+
+    private static ArrangementRow Read(SqliteDataReader reader)
+    {
+        Arrangement? arrangement = null;
+        if (!reader.IsDBNull(2))
+        {
+            var sections = Read<List<Section>>(reader.GetString(2));
+            if (sections is { Count: > 0 })
+            {
+                // A null vocals column is "could not tell", which is a different answer
+                // from an empty list, so the distinction has to survive the round trip.
+                arrangement = new Arrangement(
+                    sections,
+                    reader.IsDBNull(3) ? null : reader.GetInt32(3),
+                    reader.IsDBNull(4) ? null : reader.GetDouble(4),
+                    reader.IsDBNull(5) ? null : Read<List<VocalSpan>>(reader.GetString(5)));
+            }
+        }
+
+        return new ArrangementRow(
+            reader.GetString(0),
+            reader.GetInt64(1),
+            arrangement,
+            reader.GetString(6),
+            reader.IsDBNull(7) ? null : reader.GetString(7),
+            reader.GetInt64(8));
     }
 
     /// <summary>

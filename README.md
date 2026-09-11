@@ -11,9 +11,11 @@ for files, tags, artwork and which music exists at all. The sidecar owns everyth
 Jellyfin does not: it relays an append-only op log between a user's devices and does
 almost nothing else on purpose.
 
-**It is deliberately dumb.** It does not merge, resolve conflicts, evaluate smart-playlist
-rules, or understand what a playlist is. All of that happens on the client, against local
-SQLite. Offline is not a degraded mode; it is the normal mode that sometimes also syncs.
+**It is deliberately dumb about curation.** It does not merge, resolve conflicts, evaluate
+smart-playlist rules, or understand what a playlist is. All of that happens on the client,
+against local SQLite. Offline is not a degraded mode; it is the normal mode that sometimes
+also syncs. The one opinion it holds is what should play next — and that is arithmetic
+the clients wrote, run where the whole library and every device's history already are.
 
 ## What it does
 
@@ -34,6 +36,7 @@ SQLite. Offline is not a degraded mode; it is the normal mode that sometimes als
 | Where the beats fall, the meter, and where a mix may run | `GET /aoide/beat-grid` | 1.13.0.0 |
 | What a track is made of: sections, phrases, vocals | `GET /aoide/arrangement` | 1.15.0.0 |
 | How much of the library has been measured | `GET /aoide/analysis/coverage` | 1.14.0.0 |
+| What should play next, from the whole library | `POST /aoide/next` | 1.16.0.0 |
 
 Two scheduled tasks exist and both are **off by default**, switchable on the plugin's
 configuration page: a nightly playlist export, and a library-wide analysis sweep (hours
@@ -163,6 +166,10 @@ trace.
   and `null` meaning it could not be told — which is not an instrumental. It is the
   roughest measurement here, biased towards saying yes because the error that matters is
   missing a vocal, not inventing one.
+- **What plays next is arithmetic, not a model.** Five factors with stated weights, ported
+  from the clients and held to their parity tables, over the whole library rather than a
+  sample. Every pick comes with its five numbers so "why this?" has an answer on screen.
+  Deterministic; nothing remembered between calls.
 - **The key is a guess and is scored as one.** It hears which notes a track leans on, so
   it knows nothing about modulation and is weakest between a key and its relative major or
   minor. Meant for preferring one pair of tracks over another, never for refusing a pair.

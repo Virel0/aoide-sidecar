@@ -78,41 +78,70 @@ public sealed class BeatGridRepository
         {
             id.Value = value;
             await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-            if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            if (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
-                continue;
+                var row = Read(reader);
+                rows[row.JellyfinId] = row;
             }
-
-            BeatGrid? grid = null;
-            if (!reader.IsDBNull(2))
-            {
-                var segments = Deserialize(reader.GetString(2));
-                if (segments is { Count: > 0 })
-                {
-                    grid = new BeatGrid(
-                        segments,
-                        reader.IsDBNull(3) ? null : reader.GetInt32(3),
-                        reader.IsDBNull(4) ? null : reader.GetInt32(4),
-                        reader.IsDBNull(5) ? null : reader.GetDouble(5),
-                        reader.IsDBNull(6) ? null : reader.GetDouble(6));
-                }
-            }
-
-            var key = reader.IsDBNull(7) || reader.IsDBNull(8)
-                ? null
-                : new MusicalKey(reader.GetString(7), reader.GetDouble(8));
-
-            rows[reader.GetString(0)] = new BeatGridRow(
-                reader.GetString(0),
-                reader.GetInt64(1),
-                grid,
-                key,
-                reader.GetString(9),
-                reader.IsDBNull(10) ? null : reader.GetString(10),
-                reader.GetInt64(11));
         }
 
         return rows;
+    }
+
+    /// <summary>
+    /// Every row there is, for the ranking.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Rows keyed by id.</returns>
+    public async Task<Dictionary<string, BeatGridRow>> AllAsync(CancellationToken cancellationToken)
+    {
+        var rows = new Dictionary<string, BeatGridRow>(StringComparer.OrdinalIgnoreCase);
+        await using var connection = await _database.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT jellyfin_id, mtime_ticks, segments, beats_per_bar, downbeat_index,
+                   mix_in_ms, mix_out_ms, key_camelot, key_confidence, source, error, measured_at
+            FROM beat_grids;
+            """;
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            var row = Read(reader);
+            rows[row.JellyfinId] = row;
+        }
+
+        return rows;
+    }
+
+    private static BeatGridRow Read(SqliteDataReader reader)
+    {
+        BeatGrid? grid = null;
+        if (!reader.IsDBNull(2))
+        {
+            var segments = Deserialize(reader.GetString(2));
+            if (segments is { Count: > 0 })
+            {
+                grid = new BeatGrid(
+                    segments,
+                    reader.IsDBNull(3) ? null : reader.GetInt32(3),
+                    reader.IsDBNull(4) ? null : reader.GetInt32(4),
+                    reader.IsDBNull(5) ? null : reader.GetDouble(5),
+                    reader.IsDBNull(6) ? null : reader.GetDouble(6));
+            }
+        }
+
+        var key = reader.IsDBNull(7) || reader.IsDBNull(8)
+            ? null
+            : new MusicalKey(reader.GetString(7), reader.GetDouble(8));
+
+        return new BeatGridRow(
+            reader.GetString(0),
+            reader.GetInt64(1),
+            grid,
+            key,
+            reader.GetString(9),
+            reader.IsDBNull(10) ? null : reader.GetString(10),
+            reader.GetInt64(11));
     }
 
     /// <summary>

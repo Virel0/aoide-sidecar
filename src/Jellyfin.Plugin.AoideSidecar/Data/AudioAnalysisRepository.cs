@@ -77,27 +77,59 @@ public sealed class AudioAnalysisRepository
             await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
             if (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
-                var loudness = reader.IsDBNull(2) || reader.IsDBNull(3)
-                    ? null
-                    : new Loudness(reader.GetDouble(2), reader.GetDouble(3));
-                var tempo = reader.IsDBNull(4) || reader.IsDBNull(5)
-                    ? null
-                    : new Tempo(
-                        reader.GetDouble(4),
-                        reader.GetDouble(5),
-                        reader.IsDBNull(9) ? null : reader.GetDouble(9));
-                rows[reader.GetString(0)] = new AudioAnalysisRow(
-                    reader.GetString(0),
-                    reader.GetInt64(1),
-                    loudness,
-                    tempo,
-                    reader.GetString(6),
-                    reader.IsDBNull(7) ? null : reader.GetString(7),
-                    reader.GetInt64(8));
+                var row = Read(reader);
+                rows[row.JellyfinId] = row;
             }
         }
 
         return rows;
+    }
+
+    /// <summary>
+    /// Every row there is. For the ranking, which scores the whole library at once and
+    /// would otherwise ask for it one id at a time.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Rows keyed by id.</returns>
+    public async Task<Dictionary<string, AudioAnalysisRow>> AllAsync(CancellationToken cancellationToken)
+    {
+        var rows = new Dictionary<string, AudioAnalysisRow>(StringComparer.OrdinalIgnoreCase);
+        await using var connection = await _database.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT jellyfin_id, mtime_ticks, loudness_lufs, true_peak_dbfs, bpm, bpm_confidence,
+                   source, error, measured_at, bpm_stability
+            FROM audio_analysis;
+            """;
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            var row = Read(reader);
+            rows[row.JellyfinId] = row;
+        }
+
+        return rows;
+    }
+
+    private static AudioAnalysisRow Read(SqliteDataReader reader)
+    {
+        var loudness = reader.IsDBNull(2) || reader.IsDBNull(3)
+            ? null
+            : new Loudness(reader.GetDouble(2), reader.GetDouble(3));
+        var tempo = reader.IsDBNull(4) || reader.IsDBNull(5)
+            ? null
+            : new Tempo(
+                reader.GetDouble(4),
+                reader.GetDouble(5),
+                reader.IsDBNull(9) ? null : reader.GetDouble(9));
+        return new AudioAnalysisRow(
+            reader.GetString(0),
+            reader.GetInt64(1),
+            loudness,
+            tempo,
+            reader.GetString(6),
+            reader.IsDBNull(7) ? null : reader.GetString(7),
+            reader.GetInt64(8));
     }
 
     /// <summary>

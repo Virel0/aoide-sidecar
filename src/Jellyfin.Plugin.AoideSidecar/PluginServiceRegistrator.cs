@@ -43,6 +43,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<AudioAnalysisRepository>();
         serviceCollection.AddSingleton<BeatGridRepository>();
         serviceCollection.AddSingleton<ArrangementRepository>();
+        serviceCollection.AddSingleton<ListeningRepository>();
         serviceCollection.AddSingleton<Sound.IAudioMeasurer>(provider => new Sound.FfmpegAudioMeasurer(
             provider.GetRequiredService<MediaBrowser.Controller.MediaEncoding.IMediaEncoder>(),
             provider.GetRequiredService<ILogger<Sound.FfmpegAudioMeasurer>>(),
