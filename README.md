@@ -166,10 +166,11 @@ trace.
   and `null` meaning it could not be told — which is not an instrumental. It is the
   roughest measurement here, biased towards saying yes because the error that matters is
   missing a vocal, not inventing one.
-- **What plays next is arithmetic, not a model.** Five factors with stated weights, ported
-  from the clients and held to their parity tables, over the whole library rather than a
-  sample. Every pick comes with its five numbers so "why this?" has an answer on screen.
-  Deterministic; nothing remembered between calls.
+- **What plays next is arithmetic, not a model.** Chosen by taste, kinship, similarity
+  and arc — stated weights, ported from the clients and held to their fixtures — over the
+  whole library rather than a sample, then ordered so that neighbours mix. Every pick
+  comes with its numbers so "why this?" has an answer on screen. Deterministic; nothing
+  remembered between calls.
 - **The key is a guess and is scored as one.** It hears which notes a track leans on, so
   it knows nothing about modulation and is weakest between a key and its relative major or
   minor. Meant for preferring one pair of tracks over another, never for refusing a pair.

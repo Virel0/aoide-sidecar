@@ -40,8 +40,23 @@ internal sealed record NextRequest(
     bool AutoDj,
     int Limit);
 
-/// <summary>The five factors behind one candidate's score.</summary>
-internal sealed record NextFactors(double Taste, double Freshness, double Similarity, double? Mixability, double Arc);
+/// <summary>The factors behind one candidate's score, and how it mixes from the record before it.</summary>
+internal sealed record NextFactors(double Taste, double Freshness, double Kinship, double Similarity, double? Mixability, double Arc);
+
+/// <summary>
+/// How well one record follows another, as the planner scores it.
+/// </summary>
+internal interface IMixability
+{
+    /// <summary>
+    /// The planner's score for the pair, the crossfade figure when the planner refuses,
+    /// or null when either record is unread.
+    /// </summary>
+    /// <param name="from">The record playing.</param>
+    /// <param name="to">The one that would follow.</param>
+    /// <returns>The score, or null.</returns>
+    double? Score(string from, string to);
+}
 
 /// <summary>One candidate, scored.</summary>
 internal sealed record NextCandidate(string Id, double Score, NextFactors Factors);
@@ -79,6 +94,13 @@ internal static class NextRanker
     /// <summary>The artists of the last this many queued records count as heard lately.</summary>
     public const int QueueArtistDepth = 3;
 
+    /// <summary>
+    /// Weight of kinship with the seed. The largest single term after taste: what "plays
+    /// next" mostly means is a record of the same kind, and a pop record playing is not
+    /// followed by a techno one however well the room likes techno.
+    /// </summary>
+    public const double KinshipWeight = 0.6;
+
     /// <summary>Weight of similarity to the seed.</summary>
     public const double SimilarityWeight = 0.4;
 
@@ -99,14 +121,16 @@ internal static class NextRanker
     /// <param name="history">Every listen the server holds for this listener.</param>
     /// <param name="notInterested">Tracks flagged not interested.</param>
     /// <param name="measured">What is measured about each track, by id.</param>
+    /// <param name="mixability">How well one record follows another, for the order in Auto DJ mode.</param>
     /// <param name="nowMs">The present, for the window.</param>
-    /// <returns>The best, best first, with their factors.</returns>
+    /// <returns>The best, in the order they should play, with their factors.</returns>
     public static NextResult Rank(
         NextRequest request,
         IReadOnlyList<LibraryTrack> library,
         IReadOnlyList<PlayEvent> history,
         IReadOnlySet<string> notInterested,
         IReadOnlyDictionary<string, Measured> measured,
+        IMixability mixability,
         long nowMs)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -114,6 +138,7 @@ internal static class NextRanker
         ArgumentNullException.ThrowIfNull(history);
         ArgumentNullException.ThrowIfNull(notInterested);
         ArgumentNullException.ThrowIfNull(measured);
+        ArgumentNullException.ThrowIfNull(mixability);
 
         var byId = new Dictionary<string, LibraryTrack>(StringComparer.OrdinalIgnoreCase);
         foreach (var track in library)
@@ -132,6 +157,10 @@ internal static class NextRanker
         excluded.UnionWith(request.Queue);
         excluded.UnionWith(request.Recent);
 
+        // Choosing: by taste, kinship, similarity and arc, in both modes. Mixability is
+        // not in the choosing score at all — a set made of whatever mixes is a set of
+        // mediocre records in the same key, and a good record that can only be crossfaded
+        // is still the better record.
         var scored = new List<(NextCandidate Candidate, double Score)>();
         foreach (var track in library)
         {
@@ -147,13 +176,13 @@ internal static class NextRanker
             var artistHeardLately = profile.RecentArtists.Contains(track.Artist.ToLowerInvariant());
 
             var candidateMeasured = measured.GetValueOrDefault(track.Id) ?? Measured.Nothing;
-            var similarity = Similarity(seed, seedMeasured, track, candidateMeasured);
-            var mixability = request.AutoDj ? Mixability(seedMeasured, candidateMeasured) : null;
+            var kinship = Kinship(seed, track);
+            var similarity = Similarity(seedMeasured, candidateMeasured);
             var arc = Arc(target, candidateMeasured);
 
             var score = taste
+                        + (kinship * KinshipWeight)
                         + (similarity * SimilarityWeight)
-                        + (mixability is { } mix ? mix * TasteRanking.CompatibilityWeight : 0)
                         + (arc * ArcWeight)
                         - (heardLately ? TasteRanking.RecentPenalty : 0)
                         - (artistHeardLately ? TasteRanking.SameArtistPenalty : 0);
@@ -161,15 +190,81 @@ internal static class NextRanker
             var factors = new NextFactors(
                 Math.Clamp(taste, 0, 1),
                 heardLately ? 0 : artistHeardLately ? 0.5 : 1,
+                kinship,
                 similarity,
-                mixability,
+                null,
                 arc);
 
             scored.Add((new NextCandidate(track.Id, score, factors), score));
         }
 
-        var best = TasteRanking.Best(scored, c => c.Id, request.Limit);
-        return new NextResult(best, events, since);
+        var chosen = TasteRanking.Best(scored, c => c.Id, request.Limit);
+        var ordered = request.AutoDj ? Chain(request, chosen, mixability) : chosen;
+        return new NextResult(ordered, events, since);
+    }
+
+    /// <summary>
+    /// Puts the chosen records in the order they should play: a chain from what the first
+    /// of them will follow, each next being the record that mixes best out of the last.
+    /// </summary>
+    /// <remarks>
+    /// Chosen for its kind and its taste, placed where it mixes. A pair the planner refuses
+    /// or cannot read counts the crossfade figure, so an unread record is neither favoured
+    /// nor buried — it goes where nothing better fits. Ties go to the better-chosen record,
+    /// then the id, so the order is as deterministic as the choice.
+    /// </remarks>
+    private static List<NextCandidate> Chain(NextRequest request, List<NextCandidate> chosen, IMixability mixability)
+    {
+        var rank = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (var i = 0; i < chosen.Count; i++)
+        {
+            rank[chosen[i].Id] = i;
+        }
+
+        var remaining = new List<NextCandidate>(chosen);
+        var ordered = new List<NextCandidate>(chosen.Count);
+        var last = request.Queue.Count > 0 ? request.Queue[^1] : request.Seed;
+
+        while (remaining.Count > 0)
+        {
+            NextCandidate? next = null;
+            double? nextReported = null;
+            var best = double.NegativeInfinity;
+
+            foreach (var candidate in remaining)
+            {
+                var reported = mixability.Score(last, candidate.Id);
+                var counts = reported ?? CrossfadeOnly;
+                if (next is null || counts > best || (counts == best && rank[candidate.Id] < rank[next.Id]))
+                {
+                    next = candidate;
+                    nextReported = reported;
+                    best = counts;
+                }
+            }
+
+            remaining.Remove(next!);
+            ordered.Add(next! with { Factors = next.Factors with { Mixability = nextReported } });
+            last = next.Id;
+        }
+
+        return ordered;
+    }
+
+    /// <summary>
+    /// Whether the candidate is the seed's kind: 1 when a genre is shared, 0 when both are
+    /// tagged and none is, 0.5 when either is untagged and nothing can be said.
+    /// </summary>
+    public static double Kinship(LibraryTrack? seed, LibraryTrack candidate)
+    {
+        ArgumentNullException.ThrowIfNull(candidate);
+
+        if (seed is not { Genres.Count: > 0 } || candidate.Genres.Count == 0)
+        {
+            return 0.5;
+        }
+
+        return seed.Genres.Any(g => candidate.Genres.Contains(g, StringComparer.OrdinalIgnoreCase)) ? 1 : 0;
     }
 
     /// <summary>
@@ -310,19 +405,14 @@ internal static class NextRanker
     }
 
     /// <summary>
-    /// How alike the candidate is to the seed, from the measurements only the server has.
-    /// Four parts, mean of those that can be answered; a part with no data on either side
-    /// is left out of the mean rather than scored 0.5.
+    /// How alike the candidate is to the seed, from the measurements only the server has:
+    /// tempo, key and energy. Mean of those that can be answered; a part with no data on
+    /// either side is left out of the mean rather than scored 0.5. Genre is kinship, and
+    /// weighed separately.
     /// </summary>
-    private static double Similarity(LibraryTrack? seed, Measured seedMeasured, LibraryTrack candidate, Measured candidateMeasured)
+    private static double Similarity(Measured seedMeasured, Measured candidateMeasured)
     {
-        var parts = new List<double>(4);
-
-        if (seed is { Genres.Count: > 0 } && candidate.Genres.Count > 0)
-        {
-            var shared = seed.Genres.Any(g => candidate.Genres.Contains(g, StringComparer.OrdinalIgnoreCase));
-            parts.Add(shared ? 1 : 0);
-        }
+        var parts = new List<double>(3);
 
         if (seedMeasured.Tempo is { } seedTempo && candidateMeasured.Tempo is { } candidateTempo
             && Holds(seedTempo.Stability) && Holds(candidateTempo.Stability)
@@ -350,25 +440,6 @@ internal static class NextRanker
         }
 
         return parts.Average();
-    }
-
-    /// <summary>
-    /// Exactly the planner's score for the pair seed → candidate, or the crossfade figure
-    /// when the planner refuses. Absent when either record is unread, so an unread record
-    /// neither gains nor loses on this factor.
-    /// </summary>
-    private static double? Mixability(Measured seed, Measured candidate)
-    {
-        if (seed.Grid is null || seed.Arrangement is null || candidate.Grid is null || candidate.Arrangement is null)
-        {
-            return null;
-        }
-
-        var plan = DJPlanner.Plan(
-            new MixRecord(seed.Grid, seed.Key, seed.Arrangement),
-            new MixRecord(candidate.Grid, candidate.Key, candidate.Arrangement));
-
-        return plan?.Score.Total ?? CrossfadeOnly;
     }
 
     /// <summary>

@@ -934,7 +934,7 @@ POST /aoide/next
 ```json
 { "candidates": [
     { "id": "…", "score": 0.83,
-      "factors": { "taste": 0.71, "freshness": 1.0, "similarity": 0.62, "mixability": 0.79, "arc": 0.9 } }
+      "factors": { "taste": 0.71, "freshness": 1.0, "kinship": 1.0, "similarity": 0.62, "mixability": 0.79, "arc": 0.9 } }
   ],
   "profile": { "events": 184, "since": 1749600000000 } }
 ```
@@ -948,8 +948,10 @@ POST /aoide/next
 - 503 when storage is down, 400 for anything malformed. **A 404 from the endpoint itself
   is an older server: fall back for the session.**
 
-`factors` is why. `mixability` is `null` outside Auto DJ and for any pair where either
-record is unread — absent, not 0 — and is always written. `profile.events` is how many
+`factors` is why. `kinship` was added in 1.17.0.0. `mixability` is `null` outside Auto DJ
+and for any pair where either record is unread — absent, not 0 — and is always written; in
+Auto DJ mode it is the pair's score **from the record before it in the order**, not from
+the seed. `profile.events` is how many
 finished plays the taste term stood on; with none, taste is 0 for everything and the
 clients know to say "learning what you like".
 
@@ -960,24 +962,41 @@ mode); anything in `queue` or `recent`; the seed. Nothing else is excluded — a
 record earns no mixability and ranks on the rest. The whole library is scored; nothing is
 sampled.
 
-### The score
+### The score — choose by kin, then order by what mixes
+
+Two steps since 1.17.0.0, after a listener heard a pop record followed by EDM: the first
+version had genre as a quarter of one factor at 0.4, so a record the room liked could
+out-score one of the seed's own kind by a mile, and mixability in the choosing score, so
+with Auto DJ on the set was made of whatever *mixed*.
+
+**Choosing**, in both modes:
 
 ```
 score = taste
+      + kinship · 0.6
       + similarity · 0.4
-      + mixability · 0.6          (autodj only, when both records are read)
       + arc · 0.2
       − 1.4 if heard lately
       − 0.4 if by an artist heard lately
 ```
 
-Best `limit` by score, then by id, ordinal. Deterministic: the same request against the
-same tables returns the same list.
+Mixability is not in the choosing score at all, in either mode. A good record that can
+only be crossfaded is still the better record.
+
+**Ordering**, `autodj` mode only: the chosen `limit` records are put in the order they
+should play — a chain from what the first of them will follow (the last of `queue`, or the
+seed when nothing is queued). Each next is the record with the highest planner score for
+the pair *(last → candidate)*; a pair refused or unread counts **0.15**, the crossfade
+figure; ties go to the better-chosen record, then the id. In `infinity` mode the order is
+the choosing order.
+
+Best `limit` by choosing score, then by id, ordinal. Deterministic: the same request
+against the same tables returns the same list, in the same order.
 
 The whole rule is held to the clients' `next-ranking-fixture.json` — twenty records,
-sixteen listens on a fixed clock, one flag, seven requests with every candidate's score
-and factors to six decimals — which this repository carries byte for byte under
-`tests/…/Fixtures/`. The readings it pins where the prose left room: finish counts are
+sixteen listens on a fixed clock, one flag, a table of the planner's pair scores, and
+eight requests with every candidate's score and factors to six decimals, in the order
+they should play — which this repository carries byte for byte under `tests/…/Fixtures/`. The readings it pins where the prose left room: finish counts are
 decided listens (completed or skipped) over all time; `bpmStability` of exactly 0.5 holds
 and null holds; tempo folds, so 60 against 120 is one groove; a rise is four energies
 strictly rising and a fall the last three strictly falling, with unread records dropped
@@ -997,19 +1016,22 @@ lately — the artists of those tracks, plus the artists of the last 3 in `queue
 0.4. **A track heard lately pays both**, because it is also by an artist heard lately;
 that is the phone's arithmetic too. Reported as 1.0, 0.5 or 0.0.
 
+**Kinship** is the largest single term after taste, and is what "what plays next" mostly
+means: 1 when the candidate shares a genre with the seed, case-insensitively; 0 when both
+are tagged and none is shared; 0.5 when either is untagged and nothing can be said.
+
 **Similarity to the seed** is the mean of the parts that can be answered; a part with no
 data on either side is left out rather than scored 0.5:
 
 | part | 1 when | left out when |
 | ---- | ------ | ------------- |
-| genre | any genre is shared, case-insensitively | either has no genre tags |
 | tempo | within 2% after folding the ratio into 0.7…1.4; falling to 0 at 6% | either has no tempo, or its `bpmStability` is under 0.5 (null holds) |
 | key | same, ±1, or the relative; 0.5 when either is unknown; 0 on a clash | never |
 | energy | 1 − \|mean energy − mean energy\|, section-length weighted | either has no arrangement |
 
-**Mixability** is exactly the planner's score for the pair seed → candidate: the five
-factors in `MixScore` at the best entry the planner would choose, after every refusal
-rule. This is the third port of `DJPlanner` and is held to the clients' forty-one-pair parity
+**Mixability** is exactly the planner's score for a pair: the five factors in `MixScore`
+at the best entry the planner would choose, after every refusal rule. It orders; it does
+not choose. This is the third port of `DJPlanner` and is held to the clients' forty-one-pair parity
 table — starts and entries to a nanosecond, totals to twelve decimals, styles included. A
 pair the planner refuses scores **0.15**, the crossfade figure. A candidate with no grid or
 no arrangement earns nothing here at all.

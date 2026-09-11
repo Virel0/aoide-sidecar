@@ -7,8 +7,8 @@ namespace Jellyfin.Plugin.AoideSidecar.Tests;
 
 /// <summary>
 /// The clients' fixture for <c>/aoide/next</c>, byte for byte: twenty records, sixteen
-/// decided listens on a fixed clock, one flag, and seven requests with every candidate's
-/// score and factors to six decimals, in order.
+/// decided listens on a fixed clock, one flag, a table of the planner's pair scores, and
+/// eight requests with every candidate's score and factors to six decimals, in order.
 /// </summary>
 /// <remarks>
 /// The same file is read by the phone (<c>NextRankingFixtureTests</c>) and the desktop
@@ -31,7 +31,8 @@ public sealed class NextRankingFixtureTests
         var test = fixture.Cases[index];
 
         var request = new NextRequest(test.Seed, test.Queue, test.Recent, test.Mode == "autodj", test.Limit);
-        var result = NextRanker.Rank(request, fixture.Library, fixture.Plays, fixture.NotInterested, fixture.Measured, fixture.Now);
+        var result = NextRanker.Rank(
+            request, fixture.Library, fixture.Plays, fixture.NotInterested, fixture.Measured, fixture.Mixability, fixture.Now);
 
         Assert.True(result.ProfileEvents == test.Events, $"{test.Name}: events {result.ProfileEvents}, expected {test.Events}");
         Assert.True(
@@ -46,6 +47,7 @@ public sealed class NextRankingFixtureTests
             Assert.True(Rounded(got.Score) == Rounded(want.Score), $"{test.Name}: {got.Id} scored {got.Score}, expected {want.Score}");
             Assert.True(Rounded(got.Factors.Taste) == Rounded(want.Taste), $"{test.Name}: {got.Id} taste {got.Factors.Taste}, expected {want.Taste}");
             Assert.True(Rounded(got.Factors.Freshness) == Rounded(want.Freshness), $"{test.Name}: {got.Id} freshness {got.Factors.Freshness}, expected {want.Freshness}");
+            Assert.True(Rounded(got.Factors.Kinship) == Rounded(want.Kinship), $"{test.Name}: {got.Id} kinship {got.Factors.Kinship}, expected {want.Kinship}");
             Assert.True(Rounded(got.Factors.Similarity) == Rounded(want.Similarity), $"{test.Name}: {got.Id} similarity {got.Factors.Similarity}, expected {want.Similarity}");
             Assert.True(Rounded(got.Factors.Arc) == Rounded(want.Arc), $"{test.Name}: {got.Id} arc {got.Factors.Arc}, expected {want.Arc}");
             Assert.True(
@@ -58,7 +60,7 @@ public sealed class NextRankingFixtureTests
     [Fact]
     public void Answers_every_case_in_the_fixture()
     {
-        Assert.Equal(7, Loaded.Value.Cases.Count);
+        Assert.Equal(8, Loaded.Value.Cases.Count);
         Assert.Equal(20, Loaded.Value.Library.Count);
         Assert.Equal(16, Loaded.Value.Plays.Count);
     }
@@ -125,12 +127,33 @@ public sealed class NextRankingFixtureTests
                     e.GetProperty("score").GetDouble(),
                     f.GetProperty("taste").GetDouble(),
                     f.GetProperty("freshness").GetDouble(),
+                    f.GetProperty("kinship").GetDouble(),
                     f.GetProperty("similarity").GetDouble(),
                     f.GetProperty("mixability").ValueKind == JsonValueKind.Null ? null : f.GetProperty("mixability").GetDouble(),
                     f.GetProperty("arc").GetDouble());
             }).ToList())).ToList();
 
-        return new Fixture(root.GetProperty("now").GetInt64(), library, measured, plays, notInterested, cases);
+        // The planner's pair scores, as a table, so the chain can be pinned without
+        // grids. A pair not in the table is unread.
+        var pairs = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in root.GetProperty("mixability").EnumerateObject())
+        {
+            pairs[pair.Name] = pair.Value.GetDouble();
+        }
+
+        return new Fixture(root.GetProperty("now").GetInt64(), library, measured, plays, notInterested, new TableMixability(pairs), cases);
+    }
+
+    private sealed class TableMixability : IMixability
+    {
+        private readonly IReadOnlyDictionary<string, double> _pairs;
+
+        public TableMixability(IReadOnlyDictionary<string, double> pairs)
+        {
+            _pairs = pairs;
+        }
+
+        public double? Score(string from, string to) => _pairs.TryGetValue($"{from}>{to}", out var score) ? score : null;
     }
 
     private sealed record Fixture(
@@ -139,9 +162,10 @@ public sealed class NextRankingFixtureTests
         IReadOnlyDictionary<string, Measured> Measured,
         IReadOnlyList<PlayEvent> Plays,
         IReadOnlySet<string> NotInterested,
+        IMixability Mixability,
         IReadOnlyList<Case> Cases);
 
     private sealed record Case(string Name, string Seed, IReadOnlyList<string> Queue, IReadOnlyList<string> Recent, string Mode, int Limit, int Events, IReadOnlyList<Expected> Expected);
 
-    private sealed record Expected(string Id, double Score, double Taste, double Freshness, double Similarity, double? Mixability, double Arc);
+    private sealed record Expected(string Id, double Score, double Taste, double Freshness, double Kinship, double Similarity, double? Mixability, double Arc);
 }

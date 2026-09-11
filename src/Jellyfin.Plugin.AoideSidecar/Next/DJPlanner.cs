@@ -271,6 +271,15 @@ internal static class DJPlanner
             var anyoneSings = outgoingSings == true || incomingSings == true;
             var style = clashes || anyoneSings ? MixStyle.FilterFade : MixStyle.Blend;
 
+            // A filter fade is capped too: the filter takes the melody out of the outgoing
+            // record progressively, and thirty-two bars of a voice being slowly filtered
+            // under another record is thirty-two bars of clash. Eight is long enough for
+            // the sweep to read as a move.
+            if (style != MixStyle.Blend && bars > MinimumBars)
+            {
+                continue;
+            }
+
             return new DJTransition(
                 start,
                 entry,

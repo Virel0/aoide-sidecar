@@ -52,11 +52,15 @@ public class NextFactorsDto
     [JsonPropertyName("freshness")]
     public double Freshness { get; set; }
 
-    /// <summary>Gets or sets how alike the seed it is: genre, tempo, key, energy.</summary>
+    /// <summary>Gets or sets whether it is the seed's kind: 1 sharing a genre, 0 tagged and not, 0.5 when either is untagged.</summary>
+    [JsonPropertyName("kinship")]
+    public double Kinship { get; set; }
+
+    /// <summary>Gets or sets how alike the seed it is: tempo, key, energy.</summary>
     [JsonPropertyName("similarity")]
     public double Similarity { get; set; }
 
-    /// <summary>Gets or sets the planner's score for following the seed. Null outside Auto DJ, or when either record is unread.</summary>
+    /// <summary>Gets or sets the planner's score for following the record before it in the order. Null outside Auto DJ, or when either record is unread.</summary>
     [JsonPropertyName("mixability")]
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     public double? Mixability { get; set; }
@@ -97,7 +101,7 @@ public class NextProfileDto
 /// <summary>The answer.</summary>
 public class NextResponseDto
 {
-    /// <summary>Gets or sets the best, best first.</summary>
+    /// <summary>Gets or sets the chosen records, in the order they should play.</summary>
     [JsonPropertyName("candidates")]
     public IReadOnlyList<NextCandidateDto> Candidates { get; set; } = Array.Empty<NextCandidateDto>();
 
@@ -248,7 +252,9 @@ public class NextController : ControllerBase
             autoDj.Value,
             limit);
 
-        var result = NextRanker.Rank(request, library, history, notInterested, measured, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        var result = NextRanker.Rank(
+            request, library, history, notInterested, measured, new PlannerMixability(measured),
+            DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
 
         return Ok(new NextResponseDto
         {
@@ -260,6 +266,7 @@ public class NextController : ControllerBase
                 {
                     Taste = c.Factors.Taste,
                     Freshness = c.Factors.Freshness,
+                    Kinship = c.Factors.Kinship,
                     Similarity = c.Factors.Similarity,
                     Mixability = c.Factors.Mixability,
                     Arc = c.Factors.Arc

@@ -5,8 +5,8 @@ using Xunit;
 namespace Jellyfin.Plugin.AoideSidecar.Tests;
 
 /// <summary>
-/// The rules the clients did not have: the pool, similarity to the seed, the arc, and how
-/// mixability joins the sum. Every constant here has a test that fails when it changes.
+/// The rules the clients did not have: the pool, kinship, similarity to the seed, the
+/// arc, and how mixability orders what was chosen without choosing it. Every constant here has a test that fails when it changes.
 /// </summary>
 public sealed class NextRankerTests
 {
@@ -110,24 +110,42 @@ public sealed class NextRankerTests
     }
 
     [Fact]
-    public void Similarity_is_the_mean_of_what_can_be_answered()
+    public void Kinship_is_the_seeds_kind_and_nothing_can_be_said_of_an_untagged_record()
+    {
+        var library = new[] { Seed, Track("twin", genres: "Metal"), Track("stranger", genres: "Ambient"), Track("untagged") };
+
+        var result = Rank(new NextRequest("seed", Array.Empty<string>(), Array.Empty<string>(), false, 10), library);
+
+        Assert.Equal(1, result.Candidates.Single(c => c.Id == "twin").Factors.Kinship);
+        Assert.Equal(0, result.Candidates.Single(c => c.Id == "stranger").Factors.Kinship);
+        Assert.Equal(0.5, result.Candidates.Single(c => c.Id == "untagged").Factors.Kinship);
+
+        // The largest term after taste: a record of the seed's kind beats one that is not
+        // by 0.6, whatever the room thinks of either.
+        var twin = result.Candidates.Single(c => c.Id == "twin");
+        var stranger = result.Candidates.Single(c => c.Id == "stranger");
+        Assert.Equal(NextRanker.KinshipWeight, twin.Score - stranger.Score, 9);
+    }
+
+    [Fact]
+    public void Similarity_is_the_mean_of_what_can_be_answered_and_genre_is_not_part_of_it()
     {
         var library = new[] { Seed, Track("twin", genres: "Metal"), Track("stranger", genres: "Ambient"), Track("untagged") };
         var measured = new Dictionary<string, Measured>
         {
             ["seed"] = new(new Tempo(128, 1, 1), null, "8A", Flat(0.8)),
-            // Same genre, same tempo, relative key, same energy: every part is 1.
+            // Same tempo, relative key, same energy: every part is 1.
             ["twin"] = new(new Tempo(128, 1, 1), null, "8B", Flat(0.8)),
-            // Nothing shared: genre 0, tempo 0 (bend far past six per cent), key 0, energy 0.5.
+            // Tempo 0 (bend far past six per cent), key 0, energy 0.5.
             ["stranger"] = new(new Tempo(100, 1, 1), null, "3B", Flat(0.3)),
-            // No genres on the candidate, nothing measured: only the key part answers, at 0.5.
+            // Nothing measured: only the key part answers, at 0.5.
             ["untagged"] = new(null, null, null, null),
         };
 
         var result = Rank(new NextRequest("seed", Array.Empty<string>(), Array.Empty<string>(), false, 10), library, measured: measured);
 
         Assert.Equal(1, result.Candidates.Single(c => c.Id == "twin").Factors.Similarity, 9);
-        Assert.Equal((0 + 0 + 0 + 0.5) / 4, result.Candidates.Single(c => c.Id == "stranger").Factors.Similarity, 9);
+        Assert.Equal((0 + 0 + 0.5) / 3, result.Candidates.Single(c => c.Id == "stranger").Factors.Similarity, 9);
         Assert.Equal(0.5, result.Candidates.Single(c => c.Id == "untagged").Factors.Similarity, 9);
     }
 
@@ -171,8 +189,12 @@ public sealed class NextRankerTests
         Assert.Null(autoDj.Candidates.Single(c => c.Id == "unread").Factors.Mixability);
     }
 
+    /// <summary>
+    /// Mixability is not in the choosing score in either mode: a good record that can only
+    /// be crossfaded is still the better record. It decides the order, not the choice.
+    /// </summary>
     [Fact]
-    public void Mixability_is_the_planners_score_and_a_refusal_is_the_crossfade_figure()
+    public void Mixability_does_not_change_what_is_chosen_only_the_order()
     {
         var library = new[] { Seed, Track("mixable"), Track("too-fast") };
         var measured = new Dictionary<string, Measured>
@@ -182,20 +204,60 @@ public sealed class NextRankerTests
             ["too-fast"] = Gridded(100),
         };
 
-        var result = Rank(new NextRequest("seed", Array.Empty<string>(), Array.Empty<string>(), true, 10), library, measured: measured);
+        var infinity = Rank(new NextRequest("seed", Array.Empty<string>(), Array.Empty<string>(), false, 10), library, measured: measured);
+        var autoDj = Rank(new NextRequest("seed", Array.Empty<string>(), Array.Empty<string>(), true, 10), library, measured: measured);
+
+        foreach (var id in new[] { "mixable", "too-fast" })
+        {
+            Assert.Equal(infinity.Candidates.Single(c => c.Id == id).Score, autoDj.Candidates.Single(c => c.Id == id).Score, 12);
+        }
 
         var expected = DJPlanner.Plan(
             new MixRecord(measured["seed"].Grid!, null, measured["seed"].Arrangement),
             new MixRecord(measured["mixable"].Grid!, null, measured["mixable"].Arrangement))!.Score.Total;
-        Assert.Equal(expected, result.Candidates.Single(c => c.Id == "mixable").Factors.Mixability!.Value, 12);
-        Assert.Equal(NextRanker.CrossfadeOnly, result.Candidates.Single(c => c.Id == "too-fast").Factors.Mixability!.Value, 12);
+        Assert.Equal("mixable", autoDj.Candidates[0].Id);
+        Assert.Equal(expected, autoDj.Candidates[0].Factors.Mixability!.Value, 12);
+        // The pair mixable → too-fast is refused: the crossfade figure, from the record before it.
+        Assert.Equal(NextRanker.CrossfadeOnly, autoDj.Candidates[1].Factors.Mixability!.Value, 12);
+    }
 
-        var mixable = result.Candidates.Single(c => c.Id == "mixable");
-        Assert.Equal(
-            mixable.Factors.Taste + (mixable.Factors.Similarity * NextRanker.SimilarityWeight)
-            + (expected * TasteRanking.CompatibilityWeight) + (mixable.Factors.Arc * NextRanker.ArcWeight),
-            mixable.Score,
-            9);
+    /// <summary>
+    /// The chain starts from what the first chosen record will follow: the end of the
+    /// queue when there is one, the seed otherwise.
+    /// </summary>
+    [Fact]
+    public void The_chain_starts_from_the_end_of_the_queue()
+    {
+        var library = new[] { Seed, Track("queued"), Track("fits-seed"), Track("fits-queued") };
+        var pairs = new Dictionary<string, double>
+        {
+            ["seed>fits-seed"] = 0.9,
+            ["seed>fits-queued"] = 0.2,
+            ["queued>fits-queued"] = 0.9,
+            ["queued>fits-seed"] = 0.2,
+        };
+
+        var withQueue = NextRanker.Rank(
+            new NextRequest("seed", new[] { "queued" }, Array.Empty<string>(), true, 10),
+            library, Array.Empty<PlayEvent>(), new HashSet<string>(), new Dictionary<string, Measured>(), new Table(pairs), Now);
+        var without = NextRanker.Rank(
+            new NextRequest("seed", Array.Empty<string>(), Array.Empty<string>(), true, 10),
+            library, Array.Empty<PlayEvent>(), new HashSet<string>(), new Dictionary<string, Measured>(), new Table(pairs), Now);
+
+        Assert.Equal("fits-queued", withQueue.Candidates[0].Id);
+        Assert.Equal("fits-seed", without.Candidates[0].Id);
+    }
+
+    private sealed class Table : IMixability
+    {
+        private readonly IReadOnlyDictionary<string, double> _pairs;
+
+        public Table(IReadOnlyDictionary<string, double> pairs)
+        {
+            _pairs = pairs;
+        }
+
+        public double? Score(string from, string to) => _pairs.TryGetValue($"{from}>{to}", out var score) ? score : null;
     }
 
     [Fact]
@@ -282,6 +344,7 @@ public sealed class NextRankerTests
             history ?? Array.Empty<PlayEvent>(),
             (notInterested ?? Array.Empty<string>()).ToHashSet(StringComparer.OrdinalIgnoreCase),
             measured ?? new Dictionary<string, Measured>(),
+            new PlannerMixability(measured ?? new Dictionary<string, Measured>()),
             Now);
 
     private static LibraryTrack Track(string id, string artist = "Nobody", params string[] genres) => new(id, artist, genres);
