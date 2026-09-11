@@ -9,6 +9,14 @@
         "imageUrl": "",
         "versions": [
             {
+                "version": "1.16.2.0",
+                "changelog": "Planner follows the clients: a mix start or entry goes onto a phrase line only when one is within two bars, and onto the bar line otherwise. Forty-one parity pairs, all identical.",
+                "targetAbi": "10.11.0.0",
+                "sourceUrl": "https://github.com/Virel0/aoide-sidecar/releases/download/v1.16.2.0/aoide-sidecar_1.16.2.0.zip",
+                "checksum": "4f2d33c446154cc763251ba6c740964b",
+                "timestamp": "2026-09-11T19:50:40Z"
+            },
+            {
                 "version": "1.16.1.0",
                 "changelog": "Carries and passes the clients' next-ranking fixture, seven of seven. A decided listen is one completed or skipped, with or without an ended-at.",
                 "targetAbi": "10.11.0.0",
