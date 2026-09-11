@@ -9,6 +9,14 @@
         "imageUrl": "",
         "versions": [
             {
+                "version": "1.17.0.0",
+                "changelog": "/aoide/next round two: chosen by taste, kinship (new, 0.6), similarity and arc; mixability out of the choosing score in both modes, and used instead to order the chosen records as a chain in Auto DJ mode. factors gains kinship. Filter fades capped at eight bars in the planner. Regenerated fixture passes eight of eight; planner parity forty-one of forty-one.",
+                "targetAbi": "10.11.0.0",
+                "sourceUrl": "https://github.com/Virel0/aoide-sidecar/releases/download/v1.17.0.0/aoide-sidecar_1.17.0.0.zip",
+                "checksum": "43d82535d7600bd16e9756c5c3f59cd9",
+                "timestamp": "2026-09-11T21:24:29Z"
+            },
+            {
                 "version": "1.16.2.0",
                 "changelog": "Planner follows the clients: a mix start or entry goes onto a phrase line only when one is within two bars, and onto the bar line otherwise. Forty-one parity pairs, all identical.",
                 "targetAbi": "10.11.0.0",
