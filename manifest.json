@@ -9,6 +9,14 @@
         "imageUrl": "",
         "versions": [
             {
+                "version": "1.17.1.0",
+                "changelog": "Kinship tells a record's first genre from the rest: 1 when first genres match, 0.5 for any other shared genre. Fixture regenerated.",
+                "targetAbi": "10.11.0.0",
+                "sourceUrl": "https://github.com/Virel0/aoide-sidecar/releases/download/v1.17.1.0/aoide-sidecar_1.17.1.0.zip",
+                "checksum": "a093571f5db76430e2c7f1d228123634",
+                "timestamp": "2026-09-11T23:00:47Z"
+            },
+            {
                 "version": "1.17.0.0",
                 "changelog": "/aoide/next round two: chosen by taste, kinship (new, 0.6), similarity and arc; mixability out of the choosing score in both modes, and used instead to order the chosen records as a chain in Auto DJ mode. factors gains kinship. Filter fades capped at eight bars in the planner. Regenerated fixture passes eight of eight; planner parity forty-one of forty-one.",
                 "targetAbi": "10.11.0.0",
