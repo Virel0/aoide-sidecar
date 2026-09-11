@@ -1017,8 +1017,10 @@ lately — the artists of those tracks, plus the artists of the last 3 in `queue
 that is the phone's arithmetic too. Reported as 1.0, 0.5 or 0.0.
 
 **Kinship** is the largest single term after taste, and is what "what plays next" mostly
-means: 1 when the candidate shares a genre with the seed, case-insensitively; 0 when both
-are tagged and none is shared; 0.5 when either is untagged and nothing can be said.
+means. A record's first genre is what it is; the rest is what it touches. 1 when the
+candidate's first genre is the seed's, case-insensitively; 0.5 when any other genre is
+shared; 0 when both are tagged and none is shared; 0.5 when either is untagged and nothing
+can be said. (1.17.0.0 scored any shared genre 1; 1.17.1.0 tells the first from the rest.)
 
 **Similarity to the seed** is the mean of the parts that can be answered; a part with no
 data on either side is left out rather than scored 0.5:

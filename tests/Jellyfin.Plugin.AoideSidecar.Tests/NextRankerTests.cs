@@ -110,13 +110,22 @@ public sealed class NextRankerTests
     }
 
     [Fact]
-    public void Kinship_is_the_seeds_kind_and_nothing_can_be_said_of_an_untagged_record()
+    public void Kinship_is_the_seeds_first_genre_and_nothing_can_be_said_of_an_untagged_record()
     {
-        var library = new[] { Seed, Track("twin", genres: "Metal"), Track("stranger", genres: "Ambient"), Track("untagged") };
+        var library = new[]
+        {
+            Seed,
+            Track("twin", genres: "metal"),
+            Track("cousin", "Nobody", "Rock", "Metal"),
+            Track("stranger", genres: "Ambient"),
+            Track("untagged"),
+        };
 
         var result = Rank(new NextRequest("seed", Array.Empty<string>(), Array.Empty<string>(), false, 10), library);
 
+        // The first genre is what a record is; the rest is what it touches.
         Assert.Equal(1, result.Candidates.Single(c => c.Id == "twin").Factors.Kinship);
+        Assert.Equal(0.5, result.Candidates.Single(c => c.Id == "cousin").Factors.Kinship);
         Assert.Equal(0, result.Candidates.Single(c => c.Id == "stranger").Factors.Kinship);
         Assert.Equal(0.5, result.Candidates.Single(c => c.Id == "untagged").Factors.Kinship);
 

@@ -252,8 +252,10 @@ internal static class NextRanker
     }
 
     /// <summary>
-    /// Whether the candidate is the seed's kind: 1 when a genre is shared, 0 when both are
-    /// tagged and none is, 0.5 when either is untagged and nothing can be said.
+    /// Whether the candidate is the seed's kind. A record's first genre is what it is; the
+    /// rest is what it touches. 1 when the first genres match, 0.5 when any other genre is
+    /// shared, 0 when both are tagged and nothing is, 0.5 when either is untagged and
+    /// nothing can be said.
     /// </summary>
     public static double Kinship(LibraryTrack? seed, LibraryTrack candidate)
     {
@@ -264,7 +266,12 @@ internal static class NextRanker
             return 0.5;
         }
 
-        return seed.Genres.Any(g => candidate.Genres.Contains(g, StringComparer.OrdinalIgnoreCase)) ? 1 : 0;
+        if (string.Equals(seed.Genres[0], candidate.Genres[0], StringComparison.OrdinalIgnoreCase))
+        {
+            return 1;
+        }
+
+        return seed.Genres.Any(g => candidate.Genres.Contains(g, StringComparer.OrdinalIgnoreCase)) ? 0.5 : 0;
     }
 
     /// <summary>

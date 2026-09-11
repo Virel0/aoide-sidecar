@@ -6,18 +6,6 @@
         "candidates" : [
           {
             "factors" : {
-              "arc" : 0.5,
-              "freshness" : 1,
-              "kinship" : 1,
-              "mixability" : null,
-              "similarity" : 1,
-              "taste" : 0.18
-            },
-            "id" : "t11",
-            "score" : 1.28
-          },
-          {
-            "factors" : {
               "arc" : 1,
               "freshness" : 0.5,
               "kinship" : 1,
@@ -27,6 +15,18 @@
             },
             "id" : "t16",
             "score" : 1.04
+          },
+          {
+            "factors" : {
+              "arc" : 0.5,
+              "freshness" : 1,
+              "kinship" : 0.5,
+              "mixability" : null,
+              "similarity" : 1,
+              "taste" : 0.18
+            },
+            "id" : "t11",
+            "score" : 0.98
           },
           {
             "factors" : {
@@ -102,18 +102,6 @@
           },
           {
             "factors" : {
-              "arc" : 0.85,
-              "freshness" : 0,
-              "kinship" : 1,
-              "mixability" : null,
-              "similarity" : 0.7,
-              "taste" : 0.75
-            },
-            "id" : "t04",
-            "score" : -0
-          },
-          {
-            "factors" : {
               "arc" : 0.8,
               "freshness" : 0,
               "kinship" : 0,
@@ -126,15 +114,15 @@
           },
           {
             "factors" : {
-              "arc" : 0.98,
+              "arc" : 0.85,
               "freshness" : 0,
-              "kinship" : 1,
+              "kinship" : 0.5,
               "mixability" : null,
-              "similarity" : 0.479444,
-              "taste" : 0.39
+              "similarity" : 0.7,
+              "taste" : 0.75
             },
-            "id" : "t13",
-            "score" : -0.422222
+            "id" : "t04",
+            "score" : -0.3
           },
           {
             "factors" : {
@@ -150,15 +138,27 @@
           },
           {
             "factors" : {
+              "arc" : 0.98,
+              "freshness" : 0,
+              "kinship" : 0.5,
+              "mixability" : null,
+              "similarity" : 0.479444,
+              "taste" : 0.39
+            },
+            "id" : "t13",
+            "score" : -0.722222
+          },
+          {
+            "factors" : {
               "arc" : 0.7,
               "freshness" : 0,
-              "kinship" : 1,
+              "kinship" : 0.5,
               "mixability" : null,
               "similarity" : 0.233333,
               "taste" : 0.3
             },
             "id" : "t08",
-            "score" : -0.666667
+            "score" : -0.966667
           },
           {
             "factors" : {
@@ -216,30 +216,6 @@
         "candidates" : [
           {
             "factors" : {
-              "arc" : 0.5,
-              "freshness" : 1,
-              "kinship" : 1,
-              "mixability" : null,
-              "similarity" : 1,
-              "taste" : 0.18
-            },
-            "id" : "t11",
-            "score" : 1.28
-          },
-          {
-            "factors" : {
-              "arc" : 1,
-              "freshness" : 1,
-              "kinship" : 0,
-              "mixability" : 0.3,
-              "similarity" : 0.330556,
-              "taste" : 0
-            },
-            "id" : "t15",
-            "score" : 0.332222
-          },
-          {
-            "factors" : {
               "arc" : 0.95,
               "freshness" : 0.5,
               "kinship" : 1,
@@ -273,6 +249,30 @@
             },
             "id" : "t14",
             "score" : 0.723333
+          },
+          {
+            "factors" : {
+              "arc" : 1,
+              "freshness" : 1,
+              "kinship" : 0,
+              "mixability" : 0.9,
+              "similarity" : 0.330556,
+              "taste" : 0
+            },
+            "id" : "t15",
+            "score" : 0.332222
+          },
+          {
+            "factors" : {
+              "arc" : 0.5,
+              "freshness" : 1,
+              "kinship" : 0.5,
+              "mixability" : 0.5,
+              "similarity" : 1,
+              "taste" : 0.18
+            },
+            "id" : "t11",
+            "score" : 0.98
           },
           {
             "factors" : {
@@ -314,25 +314,13 @@
             "factors" : {
               "arc" : 0.9,
               "freshness" : 0,
-              "kinship" : 1,
+              "kinship" : 0.5,
               "mixability" : null,
               "similarity" : 0.7,
               "taste" : 0.75
             },
             "id" : "t04",
-            "score" : 0.01
-          },
-          {
-            "factors" : {
-              "arc" : 0.97,
-              "freshness" : 0,
-              "kinship" : 1,
-              "mixability" : null,
-              "similarity" : 0.479444,
-              "taste" : 0.39
-            },
-            "id" : "t13",
-            "score" : -0.424222
+            "score" : -0.29
           },
           {
             "factors" : {
@@ -345,6 +333,18 @@
             },
             "id" : "t17",
             "score" : -0.572222
+          },
+          {
+            "factors" : {
+              "arc" : 0.97,
+              "freshness" : 0,
+              "kinship" : 0.5,
+              "mixability" : null,
+              "similarity" : 0.479444,
+              "taste" : 0.39
+            },
+            "id" : "t13",
+            "score" : -0.724222
           },
           {
             "factors" : {
@@ -602,18 +602,6 @@
         "candidates" : [
           {
             "factors" : {
-              "arc" : 0.5,
-              "freshness" : 1,
-              "kinship" : 1,
-              "mixability" : null,
-              "similarity" : 1,
-              "taste" : 0.18
-            },
-            "id" : "t11",
-            "score" : 1.28
-          },
-          {
-            "factors" : {
               "arc" : 1,
               "freshness" : 0.5,
               "kinship" : 1,
@@ -623,6 +611,18 @@
             },
             "id" : "t16",
             "score" : 1.04
+          },
+          {
+            "factors" : {
+              "arc" : 0.5,
+              "freshness" : 1,
+              "kinship" : 0.5,
+              "mixability" : null,
+              "similarity" : 1,
+              "taste" : 0.18
+            },
+            "id" : "t11",
+            "score" : 0.98
           },
           {
             "factors" : {
@@ -657,13 +657,13 @@
             "factors" : {
               "arc" : 0.5,
               "freshness" : 1,
-              "kinship" : 1,
+              "kinship" : 0.5,
               "mixability" : null,
               "similarity" : 1,
               "taste" : 0.18
             },
             "id" : "t11",
-            "score" : 1.28
+            "score" : 0.98
           },
           {
             "factors" : {
@@ -727,18 +727,6 @@
           },
           {
             "factors" : {
-              "arc" : 0.85,
-              "freshness" : 0,
-              "kinship" : 1,
-              "mixability" : null,
-              "similarity" : 0.7,
-              "taste" : 0.75
-            },
-            "id" : "t04",
-            "score" : -0
-          },
-          {
-            "factors" : {
               "arc" : 0.75,
               "freshness" : 0.5,
               "kinship" : 0,
@@ -763,15 +751,15 @@
           },
           {
             "factors" : {
-              "arc" : 0.72,
+              "arc" : 0.85,
               "freshness" : 0,
-              "kinship" : 1,
+              "kinship" : 0.5,
               "mixability" : null,
-              "similarity" : 0.479444,
-              "taste" : 0.39
+              "similarity" : 0.7,
+              "taste" : 0.75
             },
-            "id" : "t13",
-            "score" : -0.474222
+            "id" : "t04",
+            "score" : -0.3
           },
           {
             "factors" : {
@@ -796,6 +784,18 @@
             },
             "id" : "t17",
             "score" : -0.570222
+          },
+          {
+            "factors" : {
+              "arc" : 0.72,
+              "freshness" : 0,
+              "kinship" : 0.5,
+              "mixability" : null,
+              "similarity" : 0.479444,
+              "taste" : 0.39
+            },
+            "id" : "t13",
+            "score" : -0.774222
           },
           {
             "factors" : {
@@ -926,18 +926,6 @@
           },
           {
             "factors" : {
-              "arc" : 0.9,
-              "freshness" : 0,
-              "kinship" : 1,
-              "mixability" : null,
-              "similarity" : 0.7,
-              "taste" : 0.75
-            },
-            "id" : "t04",
-            "score" : 0.01
-          },
-          {
-            "factors" : {
               "arc" : 0.25,
               "freshness" : 0.5,
               "kinship" : 0,
@@ -950,15 +938,15 @@
           },
           {
             "factors" : {
-              "arc" : 0.77,
+              "arc" : 0.9,
               "freshness" : 0,
-              "kinship" : 1,
+              "kinship" : 0.5,
               "mixability" : null,
-              "similarity" : 0.479444,
-              "taste" : 0.39
+              "similarity" : 0.7,
+              "taste" : 0.75
             },
-            "id" : "t13",
-            "score" : -0.464222
+            "id" : "t04",
+            "score" : -0.29
           },
           {
             "factors" : {
@@ -986,15 +974,15 @@
           },
           {
             "factors" : {
-              "arc" : 0.95,
+              "arc" : 0.77,
               "freshness" : 0,
-              "kinship" : 1,
+              "kinship" : 0.5,
               "mixability" : null,
-              "similarity" : 0.233333,
-              "taste" : 0.3
+              "similarity" : 0.479444,
+              "taste" : 0.39
             },
-            "id" : "t08",
-            "score" : -0.616667
+            "id" : "t13",
+            "score" : -0.764222
           },
           {
             "factors" : {
@@ -1007,6 +995,18 @@
             },
             "id" : "t12",
             "score" : -0.86
+          },
+          {
+            "factors" : {
+              "arc" : 0.95,
+              "freshness" : 0,
+              "kinship" : 0.5,
+              "mixability" : null,
+              "similarity" : 0.233333,
+              "taste" : 0.3
+            },
+            "id" : "t08",
+            "score" : -0.916667
           },
           {
             "factors" : {
@@ -1324,13 +1324,13 @@
             "factors" : {
               "arc" : 0.5,
               "freshness" : 1,
-              "kinship" : 1,
+              "kinship" : 0.5,
               "mixability" : 0.5,
               "similarity" : 1,
               "taste" : 0.18
             },
             "id" : "t11",
-            "score" : 1.28
+            "score" : 0.98
           }
         ],
         "events" : 11
