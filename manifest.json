@@ -9,6 +9,14 @@
         "imageUrl": "",
         "versions": [
             {
+                "version": "1.16.1.0",
+                "changelog": "Carries and passes the clients' next-ranking fixture, seven of seven. A decided listen is one completed or skipped, with or without an ended-at.",
+                "targetAbi": "10.11.0.0",
+                "sourceUrl": "https://github.com/Virel0/aoide-sidecar/releases/download/v1.16.1.0/aoide-sidecar_1.16.1.0.zip",
+                "checksum": "7b08b90a4ac97cc7f46cab67c42ec6ae",
+                "timestamp": "2026-09-11T18:30:27Z"
+            },
+            {
                 "version": "1.16.0.0",
                 "changelog": "POST /aoide/next: what should play next, chosen from the whole library rather than a random sample. Five factors \u2014 taste, freshness, similarity to the seed, mixability (Auto DJ mode), arc \u2014 each reported per candidate so a pick can be explained by its numbers. Taste and freshness are the clients' arithmetic, held to their parity table; mixability is a third port of DJPlanner that passes their forty-pair table verbatim. Deterministic, stateless, and nothing about sync changes.",
                 "targetAbi": "10.11.0.0",
