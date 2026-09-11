@@ -289,14 +289,15 @@ internal static class NextRanker
 
     /// <summary>
     /// Finish counts per track: listens that reached a verdict, and how many reached the
-    /// end. An event still open counts for nothing.
+    /// end. All time, not the taste window — the fixture pins that. A listen still open,
+    /// neither finished nor skipped, counts for nothing.
     /// </summary>
     private static Dictionary<string, FinishCounts> Finish(IReadOnlyList<PlayEvent> history)
     {
         var counts = new Dictionary<string, (int Starts, int Completed)>(StringComparer.OrdinalIgnoreCase);
         foreach (var play in history)
         {
-            if (play.EndedAt is null || !(play.Completed || play.Skipped))
+            if (!(play.Completed || play.Skipped))
             {
                 continue;
             }

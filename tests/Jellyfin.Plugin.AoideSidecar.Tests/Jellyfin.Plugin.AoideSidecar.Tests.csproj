@@ -24,6 +24,7 @@
 
   <ItemGroup>
     <None Include="match-table.json" Condition="Exists('match-table.json')" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Fixtures\next-ranking-fixture.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

@@ -974,6 +974,16 @@ score = taste
 Best `limit` by score, then by id, ordinal. Deterministic: the same request against the
 same tables returns the same list.
 
+The whole rule is held to the clients' `next-ranking-fixture.json` — twenty records,
+sixteen listens on a fixed clock, one flag, seven requests with every candidate's score
+and factors to six decimals — which this repository carries byte for byte under
+`tests/…/Fixtures/`. The readings it pins where the prose left room: finish counts are
+decided listens (completed or skipped) over all time; `bpmStability` of exactly 0.5 holds
+and null holds; tempo folds, so 60 against 120 is one groove; a rise is four energies
+strictly rising and a fall the last three strictly falling, with unread records dropped
+from the four first; the artists of the last three queued count; `mixability` is null
+and always written.
+
 **Taste** is the clients' arithmetic exactly, held to their sixteen-row parity table:
 genre 0.45 (the best-matching genre, lowercased), artist 0.3 (album artist, or first
 artist, or "Unknown Artist" — the same string the phone keys its history on), finish bias
