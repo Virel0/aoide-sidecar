@@ -164,11 +164,12 @@ internal static class DJPlanner
     }
 
     /// <summary>
-    /// A candidate entry, put on the phrase line it sits in when the record counts phrases
-    /// and on the bar line otherwise.
+    /// A candidate entry, put on the nearest phrase line when one is close and on the bar
+    /// line otherwise. A record brought in three bars into a phrase is a record brought in
+    /// at the wrong moment however exactly its beats land.
     /// </summary>
     private static double EntryPoint(double ms, BeatGrid grid, Arrangement? arrangement, double barMs) =>
-        arrangement?.PhraseStartAtOrBefore(ms, barMs)
+        arrangement?.PhraseLineNear(ms, barMs)
         ?? grid.DownbeatAtOrBefore(ms)
         ?? ms;
 
@@ -202,9 +203,13 @@ internal static class DJPlanner
             var seconds = outBar * bars / 1000;
 
             // Back from the mix-out point a whole number of bars, then onto the phrase
-            // line if the record has them.
+            // line if one is close, else the bar line. The mix may end a little before the
+            // mix-out point as a result — never seven bars before it, which would fade the
+            // hook out under the new record.
             var counted = outMixOut - (outBar * bars);
-            var startMs = outgoing.Arrangement?.PhraseStartAtOrBefore(counted, outBar) ?? counted;
+            var startMs = outgoing.Arrangement?.PhraseLineAtOrBefore(counted, outBar)
+                          ?? outgoing.Grid.DownbeatAtOrBefore(counted)
+                          ?? counted;
 
             if (startMs < notBeforeMs)
             {

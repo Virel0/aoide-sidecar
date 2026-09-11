@@ -1009,7 +1009,7 @@ data on either side is left out rather than scored 0.5:
 
 **Mixability** is exactly the planner's score for the pair seed → candidate: the five
 factors in `MixScore` at the best entry the planner would choose, after every refusal
-rule. This is the third port of `DJPlanner` and is held to the clients' forty-pair parity
+rule. This is the third port of `DJPlanner` and is held to the clients' forty-one-pair parity
 table — starts and entries to a nanosecond, totals to twelve decimals, styles included. A
 pair the planner refuses scores **0.15**, the crossfade figure. A candidate with no grid or
 no arrangement earns nothing here at all.

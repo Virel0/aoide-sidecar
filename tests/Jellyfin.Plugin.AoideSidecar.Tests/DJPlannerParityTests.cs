@@ -5,7 +5,7 @@ using Xunit;
 namespace Jellyfin.Plugin.AoideSidecar.Tests;
 
 /// <summary>
-/// The same forty pairs the phone and the desktop plan, with the same forty plans.
+/// The same forty-one pairs the phone and the desktop plan, with the same forty-one plans.
 /// </summary>
 /// <remarks>
 /// Transcribed from the clients' <c>DJPlannerParityTests.swift</c>, which is duplicated
@@ -70,7 +70,7 @@ public sealed class DJPlannerParityTests
     [Fact]
     public void Answers_every_case_in_the_table()
     {
-        Assert.Equal(40, Rows.Count);
+        Assert.Equal(41, Rows.Count);
     }
 
     private static readonly IReadOnlyList<ParityCase> Rows = new[]
@@ -144,12 +144,15 @@ public sealed class DJPlannerParityTests
             Grid(), Grid(), Plain, null, null),
         Case("matching tempo is not a substitute for knowing the arrangement",
             Grid(), Grid(), null, null, null),
-        Case("a mix starts on a phrase, not merely on a bar",
+        Case("a mix starts on the bar when the phrase line is more than two bars back",
             Grid(mixOutMs: Bar * 115), Grid(), Plain, Plain,
-            32, 150_000, 0, 1, 0.7600000000000001),
+            32, 155_625, 0, 1, 0.7600000000000001),
         Case("and comes in on one",
             Grid(), Grid(mixInMs: Bar * 11), Plain, Plain,
             32, 150_000, 0, 1, 0.7600000000000001),
+        Case("an entry a bar short of a phrase line moves forward onto it",
+            Grid(), Grid(mixInMs: Bar * 15), Plain, Plain,
+            32, 150_000, 30_000, 1, 0.8000000000000002),
         Case("without a phrase grid, a bar line is the best there is",
             Grid(mixOutMs: Bar * 115), Grid(mixInMs: Bar * 11), NoPhrases, NoPhrases,
             32, 155_625, 20_625, 1, 0.8000000000000002),
@@ -157,15 +160,15 @@ public sealed class DJPlannerParityTests
             Grid(), Grid(), SingingOut, SingingIn, null),
         Case("one voice is fine, and gets the filter fade",
             Grid(), Grid(), SingingOut, SingsLater,
-            8, 180_000, 0, 1, 0.665, MixStyle.FilterFade),
+            8, 195_000, 15_000, 1, 0.665, MixStyle.FilterFade),
         Case("not being able to tell counts as singing",
             Grid(), Grid(), CannotTell, SingingIn, null),
         Case("looked and found none is not the same as could not tell",
             Grid(), Grid(), CannotTell, Instrumental,
-            8, 180_000, 0, 1, 0.665, MixStyle.FilterFade),
+            8, 195_000, 15_000, 1, 0.665, MixStyle.FilterFade),
         Case("a drop onto a drop gets eight bars, not sixteen",
             Grid(), Grid(), DropOut, DropIn,
-            8, 180_000, 0, 1, 0.7250000000000001),
+            8, 195_000, 15_000, 1, 0.7250000000000001),
         Case("coming in on a build keeps the sixteen",
             Grid(), Grid(), DropOut, BuildIn,
             16, 180_000, 0, 1, 0.7250000000000001),
@@ -180,7 +183,7 @@ public sealed class DJPlannerParityTests
             32, 150_000, 0, 1, 0.825),
         Case("clashing keys are a capped filter fade",
             Grid(key: "3B"), Grid(key: "10B"), BuildThenDrop, BuildThenDrop,
-            8, 180_000, 0, 1, 0.625, MixStyle.FilterFade),
+            8, 195_000, 0, 1, 0.625, MixStyle.FilterFade),
         Case("the outgoing record singing is a filter fade, uncapped",
             Grid(key: "8A"), Grid(key: "9A"), SingingThroughout, BuildThenDrop,
             32, 150_000, 0, 1, 0.7649999999999999, MixStyle.FilterFade),

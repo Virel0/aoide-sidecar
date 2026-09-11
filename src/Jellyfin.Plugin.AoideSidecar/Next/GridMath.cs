@@ -98,6 +98,46 @@ internal static class GridMath
         return arrangement.Vocals.Any(v => v.StartMs < to && v.EndMs > from);
     }
 
+    /// <summary>
+    /// How far a moment may be moved to sit on a phrase line: two bars, the server's own
+    /// rule for its section boundaries. Further than that and the line is not where the
+    /// music changes — dragging a moment back seven bars puts an exit inside the hook it
+    /// was meant to end.
+    /// </summary>
+    public const double PhraseReachBars = 2.0;
+
+    /// <summary>
+    /// The phrase line at or before a moment if one is within <see cref="PhraseReachBars"/>,
+    /// else null. For moments that must not move later: an exit, a mix start.
+    /// </summary>
+    public static double? PhraseLineAtOrBefore(this Arrangement arrangement, double ms, double barMs)
+    {
+        if (arrangement.PhraseStartAtOrBefore(ms, barMs) is not { } line)
+        {
+            return null;
+        }
+
+        return ms - line <= (PhraseReachBars * barMs) + 0.5 ? line : null;
+    }
+
+    /// <summary>
+    /// The nearest phrase line to a moment, either side, if one is within
+    /// <see cref="PhraseReachBars"/>; else null. For moments that may move either way: an
+    /// entry.
+    /// </summary>
+    public static double? PhraseLineNear(this Arrangement arrangement, double ms, double barMs)
+    {
+        if (arrangement.PhraseBars is not { } phraseBars || barMs <= 0
+            || arrangement.PhraseStartAtOrBefore(ms, barMs) is not { } before)
+        {
+            return null;
+        }
+
+        var after = before + (barMs * phraseBars);
+        var nearest = ms - before <= after - ms ? before : after;
+        return Math.Abs(ms - nearest) <= (PhraseReachBars * barMs) + 0.5 ? nearest : null;
+    }
+
     /// <summary>The phrase boundary at or before a moment, when the track counts phrases.</summary>
     public static double? PhraseStartAtOrBefore(this Arrangement arrangement, double ms, double barMs)
     {
