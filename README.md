@@ -37,6 +37,7 @@ the clients wrote, run where the whole library and every device's history alread
 | What a track is made of: sections, phrases, vocals | `GET /aoide/arrangement` | 1.15.0.0 |
 | How much of the library has been measured | `GET /aoide/analysis/coverage` | 1.14.0.0 |
 | What should play next, from the whole library | `POST /aoide/next` | 1.16.0.0 |
+| The records owned and not yet heard, for the week | `GET /aoide/discover` | 1.18.0.0 |
 
 Two scheduled tasks exist and both are **off by default**, switchable on the plugin's
 configuration page: a nightly playlist export, and a library-wide analysis sweep (hours
@@ -171,6 +172,10 @@ trace.
   whole library rather than a sample, then ordered so that neighbours mix. Every pick
   comes with its numbers so "why this?" has an answer on screen. Deterministic; nothing
   remembered between calls.
+- **Discover is the same taste over what has not been heard.** Records with no finished
+  play and fewer than three starts, ranked by taste, capped per artist and album, and fixed
+  for the ISO week: it reads the week as it began, so finishing a record mid-week does not
+  reshuffle the list.
 - **The key is a guess and is scored as one.** It hears which notes a track leans on, so
   it knows nothing about modulation and is weakest between a key and its relative major or
   minor. Meant for preferring one pair of tracks over another, never for refusing a pair.

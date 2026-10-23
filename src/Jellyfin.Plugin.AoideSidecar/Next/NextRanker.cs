@@ -312,6 +312,44 @@ internal static class NextRanker
         NextRequest request,
         long since)
     {
+        var (genres, artists, events) = Listened(history, byId, since);
+
+        // Everything lately, finished or not: a song skipped an hour ago is still a song
+        // you have just heard. The request's own list is the truth about the last hour,
+        // because sync lags by minutes and a set is judged in seconds.
+        var recent = new HashSet<string>(request.Recent, StringComparer.OrdinalIgnoreCase);
+        recent.UnionWith(history
+            .GroupBy(e => e.JellyfinId, StringComparer.OrdinalIgnoreCase)
+            .Select(g => (Id: g.Key, Latest: g.Max(e => e.StartedAt)))
+            .OrderByDescending(g => g.Latest)
+            .Take(RecentDepth)
+            .Select(g => g.Id));
+
+        var recentArtists = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var id in recent.Concat(request.Queue.TakeLast(QueueArtistDepth)))
+        {
+            if (byId.TryGetValue(id, out var track) && !string.IsNullOrEmpty(track.Artist))
+            {
+                recentArtists.Add(track.Artist.ToLowerInvariant());
+            }
+        }
+
+        return (new TasteProfile(genres, artists, recent, recentArtists), events);
+    }
+
+    /// <summary>
+    /// Genre and artist weights from finished plays: the latest two hundred since
+    /// <paramref name="since"/>, each normalised against its strongest.
+    /// </summary>
+    /// <param name="history">The listens to read.</param>
+    /// <param name="byId">The library, for each track's artist and genres.</param>
+    /// <param name="since">The start of the window, milliseconds since epoch.</param>
+    /// <returns>The weights, and how many finished plays they stood on.</returns>
+    internal static (Dictionary<string, double> Genres, Dictionary<string, double> Artists, int Events) Listened(
+        IEnumerable<PlayEvent> history,
+        IReadOnlyDictionary<string, LibraryTrack> byId,
+        long since)
+    {
         var finished = history
             .Where(e => e.Completed && e.StartedAt >= since)
             .OrderByDescending(e => e.StartedAt)
@@ -345,27 +383,7 @@ internal static class NextRanker
             }
         }
 
-        // Everything lately, finished or not: a song skipped an hour ago is still a song
-        // you have just heard. The request's own list is the truth about the last hour,
-        // because sync lags by minutes and a set is judged in seconds.
-        var recent = new HashSet<string>(request.Recent, StringComparer.OrdinalIgnoreCase);
-        recent.UnionWith(history
-            .GroupBy(e => e.JellyfinId, StringComparer.OrdinalIgnoreCase)
-            .Select(g => (Id: g.Key, Latest: g.Max(e => e.StartedAt)))
-            .OrderByDescending(g => g.Latest)
-            .Take(RecentDepth)
-            .Select(g => g.Id));
-
-        var recentArtists = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var id in recent.Concat(request.Queue.TakeLast(QueueArtistDepth)))
-        {
-            if (byId.TryGetValue(id, out var track) && !string.IsNullOrEmpty(track.Artist))
-            {
-                recentArtists.Add(track.Artist.ToLowerInvariant());
-            }
-        }
-
-        return (new TasteProfile(Normalised(genres), Normalised(artists), recent, recentArtists), finished.Count);
+        return (Normalised(genres), Normalised(artists), finished.Count);
     }
 
     /// <summary>
