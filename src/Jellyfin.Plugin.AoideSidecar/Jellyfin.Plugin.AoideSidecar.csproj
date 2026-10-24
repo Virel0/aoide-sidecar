@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>Jellyfin.Plugin.AoideSidecar</RootNamespace>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
     <FileVersion>1.0.0.0</FileVersion>
@@ -17,15 +17,16 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Jellyfin.Controller" Version="10.11.11" />
+    <PackageReference Include="Jellyfin.Controller" Version="12.0.0" />
 
     <!--
-      Version-matched to Jellyfin 10.11.11's own pin, and ExcludeAssets="runtime" so the
+      Version-matched to Jellyfin 12.0's own pin, the oldest server this build loads on,
+      and ExcludeAssets="runtime" so the
       plugin ships a single DLL. The server already loads Microsoft.Data.Sqlite via EF
       Core, and shipping a second copy would give the plugin its own SQLitePCLRaw with
       no native provider registered against it — a runtime failure, not a build one.
     -->
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.11" ExcludeAssets="runtime" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.11" ExcludeAssets="runtime" />
   </ItemGroup>
 
   <ItemGroup>

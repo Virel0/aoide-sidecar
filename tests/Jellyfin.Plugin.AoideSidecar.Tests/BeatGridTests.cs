@@ -1,6 +1,5 @@
 using Jellyfin.Plugin.AoideSidecar.Sound;
 using Xunit;
-using Xunit.Abstractions;
 
 namespace Jellyfin.Plugin.AoideSidecar.Tests;
 

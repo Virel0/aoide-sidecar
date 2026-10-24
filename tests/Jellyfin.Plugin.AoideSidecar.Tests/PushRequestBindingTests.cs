@@ -2,7 +2,6 @@ using System.Text;
 using System.Text.Json;
 using Jellyfin.Plugin.AoideSidecar.Api.Models;
 using Xunit;
-using Xunit.Abstractions;
 
 namespace Jellyfin.Plugin.AoideSidecar.Tests;
 

@@ -29,6 +29,16 @@ Authorization: MediaBrowser Token="<the user's Jellyfin access token>"
 
 There is no separate login. If a Jellyfin call works, these work.
 
+## Jellyfin 12 — 2.0.0.0
+
+2.0.0.0 is the same sidecar rebuilt for Jellyfin 12 on .NET 10. Nothing on the wire
+changed: every endpoint, field and status code is as in 1.18.0.0, and the data a 1.x
+install stored is read as it was. `pluginVersion` in `/aoide/sync/status` now starts
+with `2`; gate features on a 404 or on `acceptedEntities`, as before, not on that string.
+
+A Jellyfin 10.11 server keeps 1.18.0.0 and is not offered 2.0.0.0. Jellyfin 12 cannot
+load a 1.x build, so a server upgraded to 12 needs 2.0.0.0 before any endpoint answers.
+
 ## Response casing — fixed in 1.0.2.0, action needed
 
 Before 1.0.2.0 the server returned **PascalCase** JSON — `{"Accepted":…,"Cursor":…}`,

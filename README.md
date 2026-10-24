@@ -45,8 +45,10 @@ of decoding on a large library; tracks are measured on request regardless).
 
 ## Requirements
 
-- Jellyfin **10.11.x**. The plugin targets `Jellyfin.Controller` 10.11.11 on .NET 9 and
-  ships as a single DLL.
+- Jellyfin **12.x**. The plugin targets `Jellyfin.Controller` 12.0.0 on .NET 10 and
+  ships as a single DLL. 1.18.0.0 is the last release for Jellyfin 10.11; a 10.11 server
+  is not offered anything newer, because the catalog hides versions built for a later
+  server.
 - The bundled ffmpeg Jellyfin already has — used for every audio measurement, found
   through Jellyfin's own encoder path rather than `PATH`. Nothing else needs installing.
 
@@ -202,10 +204,10 @@ on a running server (PascalCase responses, a provider stamp that vanished on upd
 empty GUID that failed a whole batch). Something like:
 
 ```bash
-docker run -d --name jf -p 8096:8096 -v "$PWD/rig/config:/config" -v "$PWD/rig/media:/media" jellyfin/jellyfin:10.11.11
+docker run -d --name jf -p 8096:8096 -v "$PWD/rig/config:/config" -v "$PWD/rig/media:/media" jellyfin/jellyfin:12.0
 ```
 
-then complete the setup wizard over the API, copy `artifacts/Aoide Sidecar_<version>`
+using the oldest Jellyfin the release targets, then complete the setup wizard over the API, copy `artifacts/Aoide Sidecar_<version>`
 into `rig/config/plugins/`, and restart the container. Stop Jellyfin before replacing a
 plugin DLL in place: overwriting a mapped file corrupts the running process's copy, and
 Jellyfin will mark the plugin malfunctioned and remove it.

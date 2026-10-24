@@ -297,9 +297,9 @@ public class SharedMatchTableTests
             $"{row.Name}: expected {row.Expected ?? "null"}, got {got ?? "null"}{detail}");
     }
 
-    private readonly Xunit.Abstractions.ITestOutputHelper _output;
+    private readonly ITestOutputHelper _output;
 
-    public SharedMatchTableTests(Xunit.Abstractions.ITestOutputHelper output)
+    public SharedMatchTableTests(ITestOutputHelper output)
     {
         _output = output;
     }
