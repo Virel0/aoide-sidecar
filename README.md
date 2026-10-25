@@ -91,7 +91,9 @@ has synced, and it prints the commands to wipe the database afterwards.
 
 [docs/client-integration.md](docs/client-integration.md) is the contract in full: the
 sync loop, cursors, every rule that gets an op rejected, the failure modes that are
-silent rather than loud, and each feature's wire shape. Per-release notes are in the
+silent rather than loud, and each feature's wire shape. [docs/auto-dj.md](docs/auto-dj.md)
+is the design of Auto DJ across the server and the apps, why it is shelved, and what would
+bring it back. Per-release notes are in the
 [GitHub releases](https://github.com/Virel0/aoide-sidecar/releases).
 
 Clients discover what a server accepts from `GET /aoide/sync/status`, which lists
